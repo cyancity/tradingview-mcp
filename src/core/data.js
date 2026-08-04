@@ -535,6 +535,73 @@ export async function getStudyValues() {
   return { success: true, study_count: data?.length || 0, studies: data || [] };
 }
 
+/**
+ * Read a study's raw plot series for the last `count` bars.
+ *
+ * The Data Window (dataWindowView) hides `display.none` plots — the
+ * machine-facts channel of facts-only indicators — but the study's underlying
+ * data series (`_data.valueAt`) carries every plot column. Titles come from
+ * the data window's item list, which keeps declaration order; each row is
+ * `[time, plot_0, plot_1, ...]`, so column i+1 belongs to title i. na values
+ * are reported as null.
+ */
+export async function getStudySeries({ entity_id, count, _deps } = {}) {
+  const evalFn = _deps?.evaluate || evaluate;
+  if (!entity_id) throw new Error('entity_id is required. Use chart_get_state to find study IDs.');
+  const limit = Math.min(count || 1, 500);
+
+  const data = await evalFn(`
+    (function() {
+      var widget = window.TradingViewApi._activeChartWidgetWV.value();
+      var chart = widget._chartWidget;
+      var wanted = ${safeString(entity_id)};
+      var studySrc = null;
+      var sources = chart.model().model().dataSources();
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
+        var id = null;
+        try { id = typeof s.id === 'string' ? s.id : (s.id ? s.id() : null); } catch (e) {}
+        if (id === wanted) { studySrc = s; break; }
+      }
+      if (!studySrc) return { error: 'Study source not found: ' + wanted };
+      var items = [];
+      try {
+        var dwv = studySrc.dataWindowView ? studySrc.dataWindowView() : null;
+        items = dwv && dwv.items ? dwv.items() : [];
+      } catch (e) {}
+      var titles = [];
+      for (var t = 0; t < items.length; t++) {
+        if (items[t] && items[t]._title) titles.push(items[t]._title);
+      }
+      var d = studySrc._data;
+      if (!d || typeof d.lastIndex !== 'function') return { error: 'Study data series not available' };
+      var last = d.lastIndex();
+      var start = Math.max(d.firstIndex(), last - ${limit} + 1);
+      var bars = [];
+      for (var idx = start; idx <= last; idx++) {
+        var row = d.valueAt(idx);
+        if (!row) continue;
+        var plots = {};
+        for (var p = 0; p < titles.length; p++) {
+          var v = row[p + 1];
+          plots[titles[p]] = (typeof v === 'number' && !isNaN(v)) ? v : null;
+        }
+        bars.push({ time: row[0], plots: plots });
+      }
+      return { bars: bars, plot_count: titles.length };
+    })()
+  `);
+
+  if (data?.error) throw new Error(data.error);
+  return {
+    success: true,
+    entity_id,
+    bar_count: data?.bars?.length || 0,
+    plot_count: data?.plot_count || 0,
+    bars: data?.bars || [],
+  };
+}
+
 export async function getPineLines({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));

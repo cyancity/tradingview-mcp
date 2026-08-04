@@ -10,7 +10,7 @@
  * (Approach from issue #155 and PR #163, verified on Desktop 3.1.0.)
  */
 import CDP from 'chrome-remote-interface';
-import { getClient, reconnectTo, CDP_HOST, CDP_PORT } from '../connection.js';
+import { getClient, reconnectTo, evaluateAsync, CDP_HOST, CDP_PORT } from '../connection.js';
 
 /**
  * List all open chart tabs (CDP page targets).
@@ -156,69 +156,45 @@ export async function newTab({ layout, name } = {}) {
 
   const wantNew = String(layout).trim().toLowerCase() === 'new';
   const layoutName = name || 'New layout';
-  const picked = await withTarget(landing.id, async (evalIn) => {
-    if (wantNew) {
-      // "Create new layout" opens a naming dialog; the Create button stays
-      // disabled until the name input is filled (React controlled input, so
-      // the native value setter + input event are required).
-      await evalIn(`(function(){ var b = document.querySelector('.create-new-layout-button'); if (b) b.click(); })()`);
-      await new Promise(r => setTimeout(r, 700));
-      const filled = await evalIn(`
-        (function() {
-          // The dialog's name field (not the landing page's Search box).
-          var inp = document.querySelector('input[placeholder="My layout"]');
-          if (!inp) {
-            var dlg = document.querySelector('[class*="dialog"], [role="dialog"]');
-            if (dlg) inp = dlg.querySelector('input');
-          }
-          if (!inp) return 'no-dialog-input';
-          var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          setter.call(inp, ${JSON.stringify(name || 'New layout')});
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-          return 'filled';
-        })()
-      `);
-      if (filled !== 'filled') throw new Error(`Create-layout dialog did not open as expected (${filled}).`);
-      await new Promise(r => setTimeout(r, 400));
-      const created = await evalIn(`
-        (function() {
-          var scope = document.querySelector('[class*="dialog"], [role="dialog"]') || document;
-          var btns = scope.querySelectorAll('button');
-          for (var i = 0; i < btns.length; i++) {
-            var t = (btns[i].textContent || '').trim().toLowerCase();
-            if (t === 'create' && !btns[i].disabled) { btns[i].click(); return true; }
-          }
-          return false;
-        })()
-      `);
-      if (!created) throw new Error('Create button not found or still disabled in the layout dialog.');
-      return layoutName;
-    }
-    const clickByTitle = `
-      (function() {
-        var q = ${JSON.stringify(String(layout).toLowerCase())};
-        var items = document.querySelectorAll('.layout-list-item');
-        for (var i = 0; i < items.length; i++) {
-          var t = items[i].querySelector('.layout-list-item-title');
-          if (t && t.textContent.trim().toLowerCase().indexOf(q) !== -1) {
-            items[i].click();
-            return t.textContent.trim();
-          }
+  const clickByTitle = (q) => `
+    (function() {
+      var q = ${JSON.stringify(String(q).toLowerCase())};
+      var items = document.querySelectorAll('.layout-list-item');
+      for (var i = 0; i < items.length; i++) {
+        var t = items[i].querySelector('.layout-list-item-title');
+        if (t && t.textContent.trim().toLowerCase().indexOf(q) !== -1) {
+          items[i].click();
+          return t.textContent.trim();
         }
-        return null;
-      })()
-    `;
-    let foundTitle = await evalIn(clickByTitle);
+      }
+      return null;
+    })()
+  `;
+  let picked = await withTarget(landing.id, async (evalIn) => {
+    if (wantNew) {
+      return createBlankChart(evalIn, layoutName);
+    }
+    let foundTitle = await evalIn(clickByTitle(layout));
     if (!foundTitle) {
       // Not in the recents — expand the full layout list and retry.
       await evalIn(`(function(){ var b = document.querySelector('.layout-list-expand-button'); if (b) b.click(); })()`);
       await new Promise(r => setTimeout(r, 800));
-      foundTitle = await evalIn(clickByTitle);
+      foundTitle = await evalIn(clickByTitle(layout));
     }
     return foundTitle;
   });
 
-  if (!picked) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
+  let openedViaInternalApi = false;
+  if (!picked) {
+    // The landing page shows favorites/recents, so a freshly saved layout can
+    // be missing from it. Fall back to the internal API: resolve the layout
+    // id via getSavedCharts, open a blank chart tab, then load the layout
+    // server-side (loadChartFromServer) in that tab.
+    const layoutId = await resolveLayoutId(layout);
+    if (!layoutId) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
+    picked = await withTarget(landing.id, (evalIn) => createBlankChart(evalIn, `B1 ${layoutName}`));
+    openedViaInternalApi = true;
+  }
 
   // The chart loads under a NEW CDP target: the file:// landing -> https://
   // chart navigation swaps renderer processes, so the target id changes.
@@ -238,12 +214,93 @@ export async function newTab({ layout, name } = {}) {
   // Give the chart a moment to boot, then follow it.
   await new Promise(r => setTimeout(r, 2000));
   await reconnectTo(chartTarget.id);
+
+  if (openedViaInternalApi) {
+    const layoutId = await resolveLayoutId(layout);
+    if (!layoutId) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
+    await evaluateAsync(`window.TradingViewApi.loadChartFromServer(${JSON.stringify(layoutId)})`);
+    await new Promise(r => setTimeout(r, 2500));
+    const url = await evaluateAsync(`window.location.href`);
+    return {
+      success: true,
+      action: 'layout_opened_in_new_tab',
+      layout,
+      layout_id: layoutId,
+      source: 'internal_api',
+      chart_id: String(url || chartTarget.url).match(/\/chart\/([^/?]+)/)?.[1] || null,
+    };
+  }
+
   return {
     success: true,
     action: wantNew ? 'new_layout_created' : 'layout_opened_in_new_tab',
     layout: picked,
     chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
   };
+}
+
+/**
+ * Click "Create new layout" on the landing page and confirm the naming
+ * dialog (React-controlled input; the native value setter + input event are
+ * required because the Create button stays disabled until the name is set).
+ */
+async function createBlankChart(evalIn, layoutName) {
+  await evalIn(`(function(){ var b = document.querySelector('.create-new-layout-button'); if (b) b.click(); })()`);
+  await new Promise(r => setTimeout(r, 700));
+  const filled = await evalIn(`
+    (function() {
+      // The dialog's name field (not the landing page's Search box).
+      var inp = document.querySelector('input[placeholder="My layout"]');
+      if (!inp) {
+        var dlg = document.querySelector('[class*="dialog"], [role="dialog"]');
+        if (dlg) inp = dlg.querySelector('input');
+      }
+      if (!inp) return 'no-dialog-input';
+      var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(inp, ${JSON.stringify(layoutName)});
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'filled';
+    })()
+  `);
+  if (filled !== 'filled') throw new Error(`Create-layout dialog did not open as expected (${filled}).`);
+  await new Promise(r => setTimeout(r, 400));
+  const created = await evalIn(`
+    (function() {
+      var scope = document.querySelector('[class*="dialog"], [role="dialog"]') || document;
+      var btns = scope.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var t = (btns[i].textContent || '').trim().toLowerCase();
+        if (t === 'create' && !btns[i].disabled) { btns[i].click(); return true; }
+      }
+      return false;
+    })()
+  `);
+  if (!created) throw new Error('Create button not found or still disabled in the layout dialog.');
+  return layoutName;
+}
+
+/**
+ * Resolve a saved layout's server id via the internal API (getSavedCharts).
+ * Runs in the connected chart target, which owns TradingViewApi.
+ */
+async function resolveLayoutId(name) {
+  const result = await evaluateAsync(`
+    new Promise(function(resolve) {
+      try {
+        var q = ${JSON.stringify(String(name).toLowerCase())};
+        window.TradingViewApi.getSavedCharts(function(charts) {
+          if (!charts || !Array.isArray(charts)) { resolve(null); return; }
+          for (var i = 0; i < charts.length; i++) {
+            var n = String(charts[i].name || charts[i].title || '');
+            if (n.toLowerCase().indexOf(q) !== -1) { resolve(String(charts[i].id || charts[i].chartId)); return; }
+          }
+          resolve(null);
+        });
+      } catch (e) { resolve(null); }
+      setTimeout(function() { resolve(null); }, 5000);
+    })
+  `);
+  return result || null;
 }
 
 /**

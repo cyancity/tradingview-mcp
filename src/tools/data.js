@@ -47,6 +47,14 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Open the DOM panel in TradingView before using this tool.' }, true); }
   });
 
+  server.tool('data_get_study_series', 'Read raw plot values from a study data series for the last N bars, including display.none plots that the Data Window hides (machine-facts channels). Returns {time, plots} rows keyed by the study\'s plot titles; na values are null.', {
+    entity_id: z.string().describe('Study entity ID (from chart_get_state)'),
+    count: z.coerce.number().optional().describe('Number of trailing bars (default 1, max 500)'),
+  }, async ({ entity_id, count }) => {
+    try { return jsonResult(await core.getStudySeries({ entity_id, count })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine Script indicators (line.new). Returns deduplicated price levels per study. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name (e.g., "Profiler", "NY Levels"). Omit for all.'),
     verbose: z.coerce.boolean().optional().describe('Return raw line data with IDs, coordinates, colors (default false — returns only unique price levels)'),
