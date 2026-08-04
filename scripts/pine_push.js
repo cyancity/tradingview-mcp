@@ -2,6 +2,7 @@
 // Push scripts/current.pine → TradingView editor, then compile
 import CDP from 'chrome-remote-interface';
 import { readFileSync } from 'fs';
+import { FIND_ACTIVE_MONACO } from '../src/core/pine.js';
 
 const srcPath = new URL('../scripts/current.pine', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
 const src = readFileSync(srcPath, 'utf-8');
@@ -12,10 +13,12 @@ if (!t) { console.error('No TradingView target'); process.exit(1); }
 const c = await CDP({ host: 'localhost', port: 9222, target: t.id });
 await c.Runtime.enable();
 
-// Inject source
+// Inject source into the VISIBLE (active) editor — the old finder picked
+// editors[0] of the first .monaco-editor.pine-editor-monaco in DOM order,
+// which can be a hidden/other script tab's editor.
 const escaped = JSON.stringify(src);
 const set = (await c.Runtime.evaluate({
-  expression: `(function(){var c=document.querySelector(".monaco-editor.pine-editor-monaco");if(!c)return false;var el=c;var fk;for(var i=0;i<20;i++){if(!el)break;fk=Object.keys(el).find(function(k){return k.startsWith("__reactFiber$")});if(fk)break;el=el.parentElement}if(!fk)return false;var cur=el[fk];for(var d=0;d<15;d++){if(!cur)break;if(cur.memoizedProps&&cur.memoizedProps.value&&cur.memoizedProps.value.monacoEnv){var env=cur.memoizedProps.value.monacoEnv;if(env.editor&&typeof env.editor.getEditors==="function"){var eds=env.editor.getEditors();if(eds.length>0){eds[0].setValue(${escaped});return true}}}cur=cur.return}return false})()`,
+  expression: `(function(){var m=${FIND_ACTIVE_MONACO};if(!m)return false;m.editor.setValue(${escaped});return true})()`,
   returnByValue: true,
 })).result?.value;
 
@@ -37,7 +40,7 @@ if (!clicked) {
 // Wait then check errors
 await new Promise(r => setTimeout(r, 3000));
 const errors = (await c.Runtime.evaluate({
-  expression: '(function(){var c=document.querySelector(".monaco-editor.pine-editor-monaco");if(!c)return[];var el=c;var fk;for(var i=0;i<20;i++){if(!el)break;fk=Object.keys(el).find(function(k){return k.startsWith("__reactFiber$")});if(fk)break;el=el.parentElement}if(!fk)return[];var cur=el[fk];for(var d=0;d<15;d++){if(!cur)break;if(cur.memoizedProps&&cur.memoizedProps.value&&cur.memoizedProps.value.monacoEnv){var env=cur.memoizedProps.value.monacoEnv;if(env.editor&&typeof env.editor.getEditors==="function"){var eds=env.editor.getEditors();if(eds.length>0){var model=eds[0].getModel();var markers=env.editor.getModelMarkers({resource:model.uri});return markers.map(function(m){return{line:m.startLineNumber,msg:m.message}})}}}cur=cur.return}return[]})()',
+  expression: `(function(){var m=${FIND_ACTIVE_MONACO};if(!m)return[];var model=m.editor.getModel();if(!model)return[];var markers=m.env.editor.getModelMarkers({resource:model.uri});return markers.map(function(x){return{line:x.startLineNumber,msg:x.message}})})()`,
   returnByValue: true,
 })).result?.value || [];
 

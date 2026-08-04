@@ -168,7 +168,8 @@ tv stream quote | jq '.close'      # monitor price changes
 tv status / launch / state / symbol / timeframe / type / info / search
 tv quote / ohlcv / values
 tv data lines/labels/tables/boxes/strategy/trades/equity/depth/indicator
-tv pine get/set/compile/analyze/check/save/new/open/list/errors/console
+tv pine get/set/compile/analyze/check/save/new/open/list/errors/console/verify-tab/targets
+tv pine open "My Script" --target <id>   # open in a specific browser tab
 tv draw shape/list/get/remove/clear
 tv alert list/create/delete
 tv watchlist get/add
@@ -273,16 +274,20 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 
 ### Pine Script Development
 
+> **Multi-tab safety:** all pine_* commands operate on the **visible (active) editor** of the **connected CDP target**, and verify state after mutating it — they fail loudly instead of editing a detached buffer. With several browser tabs open, the CLI/MCP may be attached to a different tab than the one you are looking at. Run `pine_verify_tab` before set/save to confirm which tab and which script tab are active, and use `pine_list_targets` + `pine_select_target` (CLI: `tv pine targets` + `--target <id>`) to point the tools at the right tab.
+
 | Tool | Step |
 |------|------|
-| `pine_set_source` | 1. Inject code into editor |
+| `pine_verify_tab` | **0. Inspect connected tab:** editor visible? which script tab is active? does it match the buffer? |
+| `pine_set_source` | 1. Inject code into the visible editor |
 | `pine_smart_compile` | 2. Compile with auto-detection + error check |
 | `pine_get_errors` | 3. Read compilation errors if any |
 | `pine_get_console` | 4. Read log.info() output |
-| `pine_save` | 5. Save to TradingView cloud |
-| `pine_get_source` | Read current script (**warning: can be 200KB+ for complex scripts**) |
-| `pine_new` | Create blank indicator/strategy/library |
-| `pine_open` / `pine_list_scripts` | Open or list saved scripts |
+| `pine_save` | 5. Save to TradingView cloud (Ctrl+S dispatched to the focused active editor) |
+| `pine_get_source` | Read current script from the visible editor (**warning: can be 200KB+ for complex scripts**) |
+| `pine_new` | Create blank indicator/strategy/library in the active tab |
+| `pine_open` / `pine_list_scripts` | Open a saved script (activates its editor tab, loads the source, verifies) / list saved scripts |
+| `pine_list_targets` / `pine_select_target` | List browser tabs (CDP targets) / point all pine tools at a specific tab |
 | `pine_analyze` | Offline static analysis (no chart needed) |
 | `pine_check` | Server-side compile check (no chart needed) |
 

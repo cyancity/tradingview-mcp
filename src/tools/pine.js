@@ -72,4 +72,21 @@ export function registerPineTools(server) {
     try { return jsonResult(await core.check({ source })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('pine_verify_tab', 'Inspect the Pine editor state of the CONNECTED tab: whether the editor is visible, which script tab is active, and whether the active tab matches the editor buffer. Call this BEFORE pine_set_source/pine_save to assert the right script is open (prevents silently editing a detached buffer or saving into the wrong script). Also reports the connected CDP target and the number of Monaco instances in the DOM.', {}, async () => {
+    try { return jsonResult(await core.verifyTab()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_list_targets', 'List all TradingView browser tabs (CDP targets) so you can point pine tools at the tab that actually shows the Pine editor. The MCP server is otherwise pinned to the first chart target it connected to. Pass the target id to pine_select_target.', {}, async () => {
+    try { return jsonResult(await core.listTargets()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_select_target', 'Point all subsequent pine_* operations at a specific browser tab (CDP target id from pine_list_targets). Uses the same re-attach mechanism as tab_switch. Fails loudly if the target id is unknown; pine ops also fail loudly when no visible Pine editor exists in the selected tab.', {
+    target_id: z.string().describe('CDP target id from pine_list_targets'),
+  }, async ({ target_id }) => {
+    try { return jsonResult(await core.selectTarget({ targetId: target_id })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

@@ -70,6 +70,8 @@ describe('CLI — help and routing', () => {
     assert.ok(stdout.includes('compile'));
     assert.ok(stdout.includes('analyze'));
     assert.ok(stdout.includes('check'));
+    assert.ok(stdout.includes('verify-tab'), 'verify-tab subcommand listed');
+    assert.ok(stdout.includes('targets'), 'targets subcommand listed');
   });
 
   it('ohlcv --help shows options', () => {

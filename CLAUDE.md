@@ -42,14 +42,15 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `chart_set_visible_range` → zoom to exact date range (unix timestamps)
 
 ### "Work on Pine Script"
-1. `pine_set_source` → inject code into editor
+0. `pine_verify_tab` → FIRST: assert the connected tab shows the Pine editor and the ACTIVE script tab is the one you intend to edit. With many browser tabs open the CLI/MCP can be pinned to a different tab than the visible one; use `pine_list_targets` + `pine_select_target` (or `tv pine targets` + `--target <id>`) to pick the tab.
+1. `pine_set_source` → inject code into the VISIBLE editor (verifies after writing)
 2. `pine_smart_compile` → compile with auto-detection + error check
-3. `pine_get_errors` → read compilation errors
+3. `pine_get_errors` → read compilation errors (from the visible editor)
 4. `pine_get_console` → read log.info() output
 5. `pine_get_source` → read current code back (WARNING: can be very large for complex scripts)
-6. `pine_save` → save to TradingView cloud
-7. `pine_new` → create blank indicator/strategy/library
-8. `pine_open` → load a saved script by name
+6. `pine_save` → save to TradingView cloud (Ctrl+S dispatched to the focused active editor)
+7. `pine_new` → create blank indicator/strategy/library in the ACTIVE tab
+8. `pine_open` → load a saved script by name: activates its tab in the editor tab bar, loads the source, and verifies; fails loudly if the script is not open and cannot be opened automatically
 
 ### "Practice trading with replay"
 1. `replay_start` with `date: "2025-03-01"` → enter replay mode

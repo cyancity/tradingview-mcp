@@ -696,15 +696,27 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       return false;
     }
 
+    // Visibility-aware finder (see src/core/pine.js FIND_ACTIVE_MONACO): the
+    // legacy editors[0] pick could hit a hidden/other-tab editor instance.
     const FIND_MONACO = `
-      (function findMonacoEditor() {
-        var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-        if (!container) return null;
-        var el = container;
+      (function findActiveMonacoEditor() {
+        function isVisible(el) {
+          if (!el || el.offsetParent === null) return false;
+          var r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        }
+        var containers = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+        if (!containers || containers.length === 0) return null;
+        var chosen = null;
+        for (var i = 0; i < containers.length; i++) {
+          if (isVisible(containers[i])) { chosen = containers[i]; break; }
+        }
+        if (!chosen) chosen = containers[0];
+        var el = chosen;
         var fiberKey;
-        for (var i = 0; i < 20; i++) {
+        for (var k = 0; k < 20; k++) {
           if (!el) break;
-          fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
+          fiberKey = Object.keys(el).find(function(key) { return key.indexOf('__reactFiber$') === 0; });
           if (fiberKey) break;
           el = el.parentElement;
         }
@@ -716,7 +728,15 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
             var env = current.memoizedProps.value.monacoEnv;
             if (env.editor && typeof env.editor.getEditors === 'function') {
               var editors = env.editor.getEditors();
-              if (editors.length > 0) return { editor: editors[0], env: env };
+              for (var e = 0; e < editors.length; e++) {
+                try {
+                  var dom = editors[e].getDomNode();
+                  if (dom === chosen || (dom && dom.contains(chosen)) || (chosen && chosen.contains(dom))) {
+                    return { editor: editors[e], env: env, visible: isVisible(chosen) };
+                  }
+                } catch (err) {}
+              }
+              if (editors.length > 0) return { editor: editors[0], env: env, visible: isVisible(chosen) };
             }
           }
           current = current.return;
