@@ -10,7 +10,7 @@
  * (Approach from issue #155 and PR #163, verified on Desktop 3.1.0.)
  */
 import CDP from 'chrome-remote-interface';
-import { getClient, reconnectTo, evaluateAsync, CDP_HOST, CDP_PORT } from '../connection.js';
+import { getClient, reconnectTo, evaluateAsync, getTargetInfo, CDP_HOST, CDP_PORT } from '../connection.js';
 
 /**
  * List all open chart tabs (CDP page targets).
@@ -70,7 +70,40 @@ async function withShell(fn) {
 }
 
 /** Check whether a CDP page target is the visible one. */
+/**
+ * Check whether a chart target is the *active* shell tab.
+ *
+ * `document.visibilityState` reports the *window* visibility (Electron
+ * background/minimized windows are always `hidden`), so it cannot tell which
+ * tab is active. The shell DOM's `.tabs-container .tab.active` class is the
+ * tab-level truth: query the shell window for the target's title and compare
+ * it to the active tab.
+ */
 async function isTargetVisible(targetId) {
+  // 1) Tab-level check via the shell DOM: find the tab whose title matches
+  //    this target and see if it carries the `.active` class.
+  try {
+    const shell = await withShell(async (evalIn) => {
+      const tabs = await evalIn(`
+        Array.from(document.querySelectorAll('.tabs-container .tab')).map((t) => ({
+          title: t.getAttribute('title') || t.textContent.trim(),
+          active: t.classList.contains('active'),
+        }))
+      `);
+      return tabs;
+    });
+    if (Array.isArray(shell) && shell.length) {
+      // Match by CDP target title (chart title is usually embedded in it).
+      const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+      const targets = await resp.json();
+      const target = targets.find((t) => t.id === targetId);
+      const title = target?.title?.replace(/^Live stock.*charts on /, '');
+      const tab = shell.find((t) => title && (t.title === title || title.includes(t.title) || t.title.includes(title)));
+      if (tab) return !!tab.active;
+    }
+  } catch { /* fall through to visibilityState */ }
+
+  // 2) Fallback: window-level visibility (works when the window is focused).
   let c = null;
   try {
     c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
@@ -350,6 +383,18 @@ export async function switchTab({ index }) {
   }
 
   const target = tabs.tabs[idx];
+
+  // Fast path: if the CDP client is already attached to this chart target
+  // (same chart_id in its URL), it is already the active tab — skip the
+  // shell click + visibility dance entirely. This avoids the Electron
+  // background-window false negative (visibilityState always `hidden`).
+  try {
+    const info = await getTargetInfo();
+    const currentChart = info?.url?.match(/\/chart\/([^/?]+)/)?.[1] || null;
+    if (currentChart && currentChart === target.chart_id) {
+      return { success: true, action: 'tab_switch', skipped: true, index: idx, chart_id: target.chart_id };
+    }
+  } catch { /* fall through to the click path */ }
 
   if (!(await isTargetVisible(target.id))) {
     const clicked = await withShell(async (evalIn) => {
