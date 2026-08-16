@@ -38,18 +38,45 @@ export async function getState({ _deps } = {}) {
 }
 
 export async function setSymbol({ symbol, _deps }) {
-  const { evaluateAsync, waitForChartReady } = _resolve(_deps);
-  await evaluateAsync(`
-    (function() {
-      var chart = ${CHART_API};
-      return new Promise(function(resolve) {
-        chart.setSymbol(${safeString(symbol)}, {});
-        setTimeout(resolve, 500);
-      });
-    })()
-  `);
-  const ready = await waitForChartReady(symbol);
-  return { success: true, symbol, chart_ready: ready };
+  const { evaluate, evaluateAsync, waitForChartReady } = _resolve(_deps);
+  const bare = value => String(value || '').split(':').pop().toUpperCase();
+  let actualSymbol = '';
+  let ready = false;
+
+  // A freshly opened Desktop chart can expose TradingViewApi before the chart
+  // accepts mutations. Confirm the active chart state and re-issue once when
+  // the first cold-start setSymbol was silently ignored.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await evaluateAsync(`
+      (function() {
+        var chart = ${CHART_API};
+        return new Promise(function(resolve) {
+          chart.setSymbol(${safeString(symbol)}, {});
+          setTimeout(resolve, 500);
+        });
+      })()
+    `);
+    ready = await waitForChartReady(symbol, null, 7000);
+    actualSymbol = await evaluate(`${CHART_API}.symbol()`);
+    if (bare(actualSymbol) === bare(symbol)) {
+      return {
+        success: true,
+        symbol,
+        actual_symbol: actualSymbol,
+        chart_ready: ready,
+        attempts: attempt,
+      };
+    }
+  }
+
+  return {
+    success: false,
+    symbol,
+    actual_symbol: actualSymbol,
+    chart_ready: ready,
+    attempts: 2,
+    error: `Chart did not switch to ${symbol}; still showing ${actualSymbol || 'unknown'}.`,
+  };
 }
 
 export async function setTimeframe({ timeframe, _deps }) {
