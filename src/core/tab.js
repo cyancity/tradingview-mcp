@@ -116,11 +116,44 @@ async function isTargetVisible(targetId) {
   }
 }
 
+async function fetchTargets() {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  return resp.json();
+}
+
+/** Recognize the Desktop layout-picker target even before its title loads. */
+export function isLandingTarget(target) {
+  return target?.type === 'page' && (
+    String(target.title || '').trim().toLowerCase() === 'new tab'
+    || /\/app\/new-tab\/index\.html/i.test(String(target.url || ''))
+  );
+}
+
 /** Find an open new-tab landing page target (shows the layout picker). */
 async function findLandingTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
-  return targets.find(t => t.type === 'page' && t.title === 'New tab') || null;
+  const targets = await fetchTargets();
+  return targets.find(isLandingTarget) || null;
+}
+
+/**
+ * A cold Desktop launch can create the renderer target several seconds after
+ * the shell tab click. Poll the CDP target list instead of relying on one
+ * fixed sleep and the eventually-populated page title.
+ */
+export async function waitForLandingTarget({
+  attempts = 30,
+  delayMs = 500,
+  listTargets = fetchTargets,
+  sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  const boundedAttempts = Math.max(1, Number(attempts) || 1);
+  for (let attempt = 0; attempt < boundedAttempts; attempt++) {
+    const targets = await listTargets();
+    const landing = targets.find(isLandingTarget);
+    if (landing) return landing;
+    if (attempt + 1 < boundedAttempts) await sleep(delayMs);
+  }
+  return null;
 }
 
 /** Run fn with an eval helper attached to a specific target. */
@@ -160,17 +193,17 @@ export async function newTab({ layout, name } = {}) {
         })()
       `);
       if (!clicked) throw new Error('New-tab button not found in shell window.');
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 250));
       const after = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
       return { before, after };
     });
-    landing = await findLandingTarget();
+    landing = await waitForLandingTarget();
   }
 
   if (!layout) {
     const state = await list();
     return {
-      success: shellCounts ? shellCounts.after > shellCounts.before : !!landing,
+      success: !!landing || (shellCounts ? shellCounts.after > shellCounts.before : false),
       action: 'new_tab_opened',
       note: 'Tab is on the layout picker. Call tab_new with layout: "new" or a saved layout name to open a chart in it.',
       ...state,
