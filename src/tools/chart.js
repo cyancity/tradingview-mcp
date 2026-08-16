@@ -51,7 +51,7 @@ export const tools = [
   },
   {
     name: 'symbol_info',
-    description: 'Get detailed metadata about the current symbol (name, exchange, type, description)',
+    description: 'Get detailed metadata about the current symbol (name, exchange, type, description, tick convention: minmov/pricescale)',
     schema: {},
     handler: () => core.symbolInfo(),
   },

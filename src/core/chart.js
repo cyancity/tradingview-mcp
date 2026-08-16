@@ -290,6 +290,8 @@ export async function symbolInfo({ _deps } = {}) {
       return {
         symbol: info.symbol, full_name: info.full_name, exchange: info.exchange,
         description: info.description, type: info.type, pro_name: info.pro_name,
+        minmov: info.minmov, pricescale: info.pricescale,
+        fractional: info.fractional, minmove2: info.minmove2,
         typespecs: info.typespecs, resolution: chart.resolution(), chart_type: chart.chartType()
       };
     })()

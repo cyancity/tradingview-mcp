@@ -45,11 +45,18 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
       continue;
     }
 
-    // Check symbol match if expected
-    if (expectedSymbol && state.currentSymbol && !state.currentSymbol.toUpperCase().includes(expectedSymbol.toUpperCase())) {
-      stableCount = 0;
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
-      continue;
+    // Check symbol match if expected — compare bare symbols so a request for
+    // "NASDAQ:QQQ" matches the legend's "QQQ" (or "BATS:QQQ").
+    if (expectedSymbol && state.currentSymbol) {
+      const bare = s => String(s || '').split(':').pop().toUpperCase().replace(/!$/, '');
+      const expectedBare = bare(expectedSymbol);
+      const currentBare = bare(state.currentSymbol);
+      const matches = expectedBare && currentBare === expectedBare;
+      if (!matches) {
+        stableCount = 0;
+        await new Promise(r => setTimeout(r, POLL_INTERVAL));
+        continue;
+      }
     }
 
     // Check bar count stability
