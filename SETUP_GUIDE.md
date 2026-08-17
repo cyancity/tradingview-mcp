@@ -42,7 +42,7 @@ After the MCP server is connected, use the `tv_launch` tool — it auto-detects 
 
 Mac:
 ```bash
-/Applications/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=9222
+/Applications/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=9223
 ```
 
 Windows:
@@ -60,20 +60,20 @@ Manual equivalent of that fallback, if you need it:
 ```powershell
 $pkg = (Get-AppxPackage TradingView.Desktop).InstallLocation
 Copy-Item "$pkg\*" "$env:LOCALAPPDATA\tradingview-mcp\TradingView" -Recurse -Force
-& "$env:LOCALAPPDATA\tradingview-mcp\TradingView\TradingView.exe" --remote-debugging-port=9222
+& "$env:LOCALAPPDATA\tradingview-mcp\TradingView\TradingView.exe" --remote-debugging-port=9223
 ```
 
 Reading files out of `WindowsApps` by exact path is allowed even where executing them isn't. Do **not** try to change ACLs on `WindowsApps` with `icacls` — it fails and can break app servicing.
 
 Legacy (pre-MSIX) installs:
 ```bash
-%LOCALAPPDATA%\TradingView\TradingView.exe --remote-debugging-port=9222
+%LOCALAPPDATA%\TradingView\TradingView.exe --remote-debugging-port=9223
 ```
 
 Linux:
 ```bash
-/opt/TradingView/tradingview --remote-debugging-port=9222
-# or: tradingview --remote-debugging-port=9222
+/opt/TradingView/tradingview --remote-debugging-port=9223
+# or: tradingview --remote-debugging-port=9223
 ```
 
 ## Step 4: Restart Claude Code
@@ -97,7 +97,7 @@ Use the `tv_health_check` tool. Expected response:
 }
 ```
 
-If `cdp_connected: false`, TradingView is not running with `--remote-debugging-port=9222`.
+If `cdp_connected: false`, TradingView is not running with `--remote-debugging-port=9223`.
 
 ## Step 6: Install CLI (Optional)
 
@@ -114,9 +114,9 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 
 | Problem | Solution |
 |---------|----------|
-| `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9222` |
+| `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9223` |
 | Windows: "Access is denied" launching from `WindowsApps` | Use `tv_launch` (auto copy-fallback) or the manual copy snippet in Step 3 — never `icacls` on WindowsApps |
-| `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
+| `ECONNREFUSED` | TradingView isn't running or port 9223 is blocked |
 | MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
