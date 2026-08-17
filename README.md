@@ -20,7 +20,7 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 
 This tool does not connect to TradingView's servers, modify any TradingView files, or intercept any network traffic. It communicates exclusively with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP) — a standard debugging interface built into all Chromium/Electron applications by Google, including VS Code, Slack, and Discord.
 
-The debug port is disabled by default and must be explicitly enabled by you using a standard Chromium flag (`--remote-debugging-port=9222`). Nothing happens without that deliberate step.
+The debug port is disabled by default and must be explicitly enabled by you using a standard Chromium flag (`--remote-debugging-port=9223`). Nothing happens without that deliberate step.
 
 ## What This Tool Does Not Do
 
@@ -90,7 +90,7 @@ npm install
 
 ### 2. Launch TradingView with CDP
 
-TradingView Desktop must be running with Chrome DevTools Protocol enabled on port 9222.
+TradingView Desktop must be running with Chrome DevTools Protocol enabled on port 9223.
 
 **Mac:**
 ```bash
@@ -109,7 +109,7 @@ scripts\launch_tv_debug.bat
 
 **Or launch manually on any platform:**
 ```bash
-/path/to/TradingView --remote-debugging-port=9222
+/path/to/TradingView --remote-debugging-port=9223
 ```
 
 **Or use the MCP tool** (auto-detects your install):
@@ -135,6 +135,38 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 ### 4. Verify
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
+
+## Tool Profiles & Context Optimization
+
+88 granular pre-v3 tools were consolidated into **44 semantic tools** (v3). If a client (agent/app) only uses part of the surface, shrink the tool manifest further with env vars — the fewer tools registered, the less LLM context the `tools/list` manifest consumes:
+
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["/path/to/tradingview-mcp/src/server.js"],
+      "env": {
+        "TV_MCP_PROFILE": "quant",
+        "TV_MCP_LEGACY": "0"
+      }
+    }
+  }
+}
+```
+
+| Env var | Values | Effect |
+|---|---|---|
+| `TV_MCP_PROFILE` | `full` (default), `quant`, `data`, `chart`, `pine`, `ui`, `minimal`, `lazy`, or comma-combined group names (`data,chart,capture`) | Which tool groups to register |
+| `TV_MCP_TOOLS` | Exact names or prefix globs, e.g. `data_get_ohlcv,tab_*` | Explicit allowlist, unioned with the profile; alone it gives exact control |
+| `TV_MCP_LEGACY` | `1` / `0` (default off) | Also register pre-v3 tool names as aliases of the consolidated tools |
+| `TV_MCP_PRETTY` | `1` | Pretty-print tool JSON output (default: compact) |
+
+- Presets: `quant` = data+chart+indicators+capture+batch+health · `minimal` = 11 high-frequency tools · `lazy` = `tv_call` + `tv_tools_catalog` + 5 core tools (discover everything else on demand).
+- Compare manifests with `pnpm tools:report` (tool counts + estimated tokens per profile).
+- Full legacy → v3 name mapping lives in `CLAUDE.md` and `pnpm tools:report --markdown`.
+
+**v3 migration** (breaking): `chart_set_symbol`/`chart_set_timeframe`/`chart_set_type` → `chart_set`; `chart_scroll_to_date` + `chart_set_visible_range` → `chart_goto`; `chart_manage_indicator` + `indicator_add/search/set_inputs/toggle_visibility` → `indicator`; `data_get_indicator`/`_study_series`/`_study_values` → `data_get_study`; `data_get_pine_lines/_labels/_tables/_boxes` → `data_get_pine_drawings` (`kind`); `pine_get/set_source`, `pine_save` → `pine_source`; `pine_smart_compile` → `pine_compile smart=true`; `pine_get_errors/_console` → `pine_diagnostics`; `pine_new/open/list_scripts/verify_tab` → `pine_script`; `pine_list_targets/select_target` → `tab_list targets=true` / `tab_switch target_id`; `pane_*` → `pane`; `replay_*` → `replay`; `draw_*` → `draw`; `alert_list/delete` → `alert_manage`; `watchlist_add_bulk` → `watchlist_add` (`symbols` array); 8 `ui_*` input tools → `ui_input`. Set `TV_MCP_LEGACY=1` to keep old names during transition.
 
 ## CLI
 
@@ -341,25 +373,25 @@ Launch scripts and `tv_launch` auto-detect TradingView. If auto-detection fails:
 | **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` |
 | **Linux** | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
 
-The key flag: `--remote-debugging-port=9222`
+The key flag: `--remote-debugging-port=9223`
 
 ## Testing
 
 ```bash
-# Requires TradingView running with --remote-debugging-port=9222
+# Requires TradingView running with --remote-debugging-port=9223
 npm test
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+170+ tests covering: tool registry/profile filtering, Pine Script static analysis, server-side compilation, and CLI routing.
 
 ## Architecture
 
 ```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9223)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
-- **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Transport**: MCP over stdio (44 tools by default; 88 with `TV_MCP_LEGACY=1`; profile-filterable via `TV_MCP_PROFILE`) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Connection**: Chrome DevTools Protocol on localhost:9223
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 
@@ -375,7 +407,7 @@ This tool is an independent MCP server that connects to Claude Code via the stan
 
 This project is provided **for personal, educational, and research purposes only**.
 
-**How this tool works:** This tool uses Chrome DevTools Protocol (CDP), the standard debugging interface built into Chromium-based applications. It does not reverse engineer any proprietary TradingView protocol, connect to TradingView's servers, or bypass any access controls. The debug port must be explicitly enabled by the user via a standard Chromium command-line flag (`--remote-debugging-port=9222`).
+**How this tool works:** This tool uses Chrome DevTools Protocol (CDP), the standard debugging interface built into Chromium-based applications. It does not reverse engineer any proprietary TradingView protocol, connect to TradingView's servers, or bypass any access controls. The debug port must be explicitly enabled by the user via a standard Chromium command-line flag (`--remote-debugging-port=9223`).
 
 By using this software, you acknowledge and agree that:
 

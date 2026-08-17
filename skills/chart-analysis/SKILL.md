@@ -9,13 +9,12 @@ You are performing technical analysis on a TradingView chart.
 
 ## Step 1: Set Up the Chart
 
-1. `chart_set_symbol` — switch to the requested symbol
-2. `chart_set_timeframe` — set the appropriate timeframe
-3. Wait for the chart to load (the tool handles this)
+1. `chart_set` — switch to the requested symbol and timeframe (one call: `symbol` + `timeframe`)
+2. Wait for the chart to load (the tool handles this)
 
 ## Step 2: Add Indicators
 
-Use `chart_manage_indicator` to add studies. Common names (must use FULL names):
+Use `indicator` with action "add" to add studies. Common names (must use FULL names):
 - "Relative Strength Index" (not RSI)
 - "Moving Average Exponential" (not EMA)
 - "Moving Average" (for SMA)
@@ -25,20 +24,20 @@ Use `chart_manage_indicator` to add studies. Common names (must use FULL names):
 - "VWAP"
 - "Average True Range"
 
-After adding, use `indicator_set_inputs` to customize settings (e.g., change EMA length to 200).
+After adding, use `indicator` with action "set_inputs" to customize settings (e.g., change EMA length to 200).
 
 ## Step 3: Navigate to Key Areas
 
-- `chart_scroll_to_date` — jump to a specific date of interest
-- `chart_set_visible_range` — zoom to a specific date window
+- `chart_goto` with a date — jump to a specific date of interest
+- `chart_goto` with from/to — zoom to a specific date window
 - `chart_get_visible_range` — check what's currently visible
 
 ## Step 4: Annotate
 
 Use drawing tools to mark up the chart:
-- `draw_shape` with `horizontal_line` for support/resistance
-- `draw_shape` with `trend_line` for trend channels (needs two points)
-- `draw_shape` with `text` for annotations
+- `draw` (action "shape") with `horizontal_line` for support/resistance
+- `draw` (action "shape") with `trend_line` for trend channels (needs two points)
+- `draw` (action "shape") with `text` for annotations
 
 ## Step 5: Capture and Analyze
 
@@ -58,5 +57,5 @@ Provide the analysis:
 ## Cleanup
 
 If you added indicators the user didn't ask for, remove them:
-- `chart_manage_indicator` with action "remove" and the entity_id
-- `draw_clear` to remove all drawings if they were temporary
+- `indicator` with action "remove" and the entity_id
+- `draw` (action "clear") to remove all drawings if they were temporary

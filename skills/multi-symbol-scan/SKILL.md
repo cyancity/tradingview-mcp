@@ -34,10 +34,10 @@ action: "screenshot"
 
 ### For Custom Analysis (per-symbol)
 Loop through symbols manually:
-1. `chart_set_symbol` + `chart_set_timeframe`
-2. `chart_manage_indicator` — add the study
+1. `chart_set` — switch symbol and timeframe (one call: `symbol` + `timeframe`)
+2. `indicator` (action "add") — add the study
 3. `data_get_ohlcv` — pull price data
-4. `data_get_indicator` — read indicator values
+4. `data_get_study` — read indicator values (entity_id for one study; no args for all visible)
 5. Analyze and record findings
 
 ## Step 3: Compile Results
@@ -61,4 +61,4 @@ Present findings:
 To scan the user's watchlist:
 1. `watchlist_get` — read all symbols
 2. Use the symbol list for the scan
-3. `watchlist_add` — add new finds to the watchlist
+3. `watchlist_add` — add new finds (accepts multiple symbols)

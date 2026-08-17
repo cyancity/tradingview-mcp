@@ -1,76 +1,107 @@
 import { z } from 'zod';
-import { jsonResult } from './_format.js';
 import * as core from '../core/chart.js';
 
-export function registerChartTools(server) {
-  server.tool('chart_get_state', 'Get current chart state (symbol, timeframe, chart type, indicators)', {}, async () => {
-    try { return jsonResult(await core.getState()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+// Consolidated tool definitions. Entries with `legacy: '<replacement>'` are
+// pre-v3 tool names, registered only when TV_MCP_LEGACY=1.
+export const group = 'chart';
 
-  server.tool('chart_set_symbol', 'Change the chart symbol', {
-    symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)'),
-  }, async ({ symbol }) => {
-    try { return jsonResult(await core.setSymbol({ symbol })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+export const tools = [
+  {
+    name: 'chart_get_state',
+    description: 'Get current chart state (symbol, timeframe, chart type, indicators with entity IDs). Call this first.',
+    schema: {},
+    handler: () => core.getState(),
+  },
+  {
+    name: 'chart_set',
+    description: 'Change chart symbol, timeframe and/or chart type in one atomic call. Provide at least one field; multiple fields apply in order symbol → timeframe → chart_type.',
+    schema: {
+      symbol: z.string().optional().describe('Symbol (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)'),
+      timeframe: z.string().optional().describe('Timeframe (e.g., 1, 5, 15, 60, D, W, M)'),
+      chart_type: z.string().optional().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — name or number'),
+    },
+    handler: async ({ symbol, timeframe, chart_type }) => {
+      if (!symbol && !timeframe && !chart_type) throw new Error('Provide at least one of: symbol, timeframe, chart_type.');
+      const applied = {};
+      if (symbol) applied.symbol = await core.setSymbol({ symbol });
+      if (timeframe) applied.timeframe = await core.setTimeframe({ timeframe });
+      if (chart_type) applied.chart_type = await core.setType({ chart_type });
+      return { success: true, applied };
+    },
+  },
+  {
+    name: 'chart_goto',
+    description: 'Navigate the chart view: center on a date, or zoom to an explicit date range (unix seconds).',
+    schema: {
+      date: z.string().optional().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string — centers the view on this date'),
+      from: z.coerce.number().optional().describe('Range start (unix seconds) — use together with `to`'),
+      to: z.coerce.number().optional().describe('Range end (unix seconds)'),
+    },
+    handler: async ({ date, from, to }) => {
+      if (date) return core.scrollToDate({ date });
+      if (from !== undefined && to !== undefined) return core.setVisibleRange({ from, to });
+      throw new Error('Provide either `date`, or both `from` and `to`.');
+    },
+  },
+  {
+    name: 'chart_get_visible_range',
+    description: 'Get the visible date range (unix timestamps) and bars range on the chart',
+    schema: {},
+    handler: () => core.getVisibleRange(),
+  },
+  {
+    name: 'symbol_info',
+    description: 'Get detailed metadata about the current symbol (name, exchange, type, description)',
+    schema: {},
+    handler: () => core.symbolInfo(),
+  },
+  {
+    name: 'symbol_search',
+    description: 'Search for symbols by name or keyword',
+    schema: {
+      query: z.string().describe('Search query (e.g., "AAPL", "crude oil", "ES")'),
+      type: z.string().optional().describe('Filter by type (e.g., "stock", "futures", "crypto", "forex")'),
+    },
+    handler: ({ query, type }) => core.symbolSearch({ query, type }),
+  },
 
-  server.tool('chart_set_timeframe', 'Change the chart timeframe/resolution', {
-    timeframe: z.string().describe('Timeframe (e.g., 1, 5, 15, 60, D, W, M)'),
-  }, async ({ timeframe }) => {
-    try { return jsonResult(await core.setTimeframe({ timeframe })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('chart_set_type', 'Change chart type', {
-    chart_type: z.string().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
-  }, async ({ chart_type }) => {
-    try { return jsonResult(await core.setType({ chart_type })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('chart_manage_indicator', 'Add or remove an indicator/study on the chart', {
-    action: z.enum(['add', 'remove']).describe('Action: add or remove'),
-    indicator: z.string().optional().describe('Full indicator name (required for add): "Relative Strength Index", "MACD", "Volume", "Moving Average", "Bollinger Bands", "Moving Average Exponential". Short names like RSI/EMA do NOT work. Not needed for remove.'),
-    entity_id: z.string().optional().describe('Entity ID (from chart_get_state). Required for remove.'),
-    inputs: z.string().optional().describe('JSON string of input overrides for the indicator (e.g., \'{"length": 20}\')'),
-  }, async ({ action, indicator, entity_id, inputs }) => {
-    try {
-      if (action === 'add' && !indicator) throw new Error('indicator name is required for add action.');
-      return jsonResult(await core.manageIndicator({ action, indicator, entity_id, inputs }));
-    } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('chart_get_visible_range', 'Get the visible date range (unix timestamps) and bars range on the chart', {}, async () => {
-    try { return jsonResult(await core.getVisibleRange()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('chart_set_visible_range', 'Zoom the chart to a specific date range (unix timestamps)', {
-    from: z.coerce.number().describe('Start of range (unix timestamp in seconds)'),
-    to: z.coerce.number().describe('End of range (unix timestamp in seconds)'),
-  }, async ({ from, to }) => {
-    try { return jsonResult(await core.setVisibleRange({ from, to })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('chart_scroll_to_date', 'Jump the chart view to center on a specific date', {
-    date: z.string().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string'),
-  }, async ({ date }) => {
-    try { return jsonResult(await core.scrollToDate({ date })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('symbol_info', 'Get detailed metadata about the current symbol (name, exchange, type, description)', {}, async () => {
-    try { return jsonResult(await core.symbolInfo()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.tool('symbol_search', 'Search for symbols by name or keyword', {
-    query: z.string().describe('Search query (e.g., "AAPL", "crude oil", "ES")'),
-    type: z.string().optional().describe('Filter by type (e.g., "stock", "futures", "crypto", "forex")'),
-  }, async ({ query, type }) => {
-    try { return jsonResult(await core.symbolSearch({ query, type })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-}
+  // --- legacy aliases (TV_MCP_LEGACY=1) ---
+  {
+    name: 'chart_set_symbol',
+    description: 'Change the chart symbol',
+    legacy: 'chart_set',
+    schema: { symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)') },
+    handler: ({ symbol }) => core.setSymbol({ symbol }),
+  },
+  {
+    name: 'chart_set_timeframe',
+    description: 'Change the chart timeframe/resolution',
+    legacy: 'chart_set',
+    schema: { timeframe: z.string().describe('Timeframe (e.g., 1, 5, 15, 60, D, W, M)') },
+    handler: ({ timeframe }) => core.setTimeframe({ timeframe }),
+  },
+  {
+    name: 'chart_set_type',
+    description: 'Change chart type',
+    legacy: 'chart_set',
+    schema: { chart_type: z.string().describe('Chart type name or number 0-9') },
+    handler: ({ chart_type }) => core.setType({ chart_type }),
+  },
+  {
+    name: 'chart_set_visible_range',
+    description: 'Zoom the chart to a specific date range (unix timestamps)',
+    legacy: 'chart_goto',
+    schema: {
+      from: z.coerce.number().describe('Start of range (unix timestamp in seconds)'),
+      to: z.coerce.number().describe('End of range (unix timestamp in seconds)'),
+    },
+    handler: ({ from, to }) => core.setVisibleRange({ from, to }),
+  },
+  {
+    name: 'chart_scroll_to_date',
+    description: 'Jump the chart view to center on a specific date',
+    legacy: 'chart_goto',
+    schema: { date: z.string().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string') },
+    handler: ({ date }) => core.scrollToDate({ date }),
+  },
+];
