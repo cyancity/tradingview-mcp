@@ -32,9 +32,10 @@ import * as alerts from './alerts.js';
 import * as watchlist from './watchlist.js';
 import * as ui from './ui.js';
 import * as batch from './batch.js';
+import * as trading from './trading.js';
 
 // Fixed order = registration order = tools/list order.
-const DOMAINS = [health, chart, indicators, data, capture, pine, tab, pane, replay, drawing, alerts, watchlist, ui, batch];
+const DOMAINS = [health, chart, indicators, data, capture, pine, tab, pane, replay, drawing, alerts, watchlist, ui, batch, trading];
 
 // Tools always exposed in lazy mode next to tv_call/tv_tools_catalog.
 const LAZY_CORE = [

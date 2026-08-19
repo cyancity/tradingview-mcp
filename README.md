@@ -210,6 +210,7 @@ tv layout list/switch
 tv pane list/layout/focus/symbol
 tv tab list/new/close/switch
 tv replay start/step/stop/status/autoplay/trade
+tv trading trade/probe/status           # EXPERIMENTAL paper-trading panel (DOM)
 tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
@@ -333,6 +334,40 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `replay_trade` | Buy/sell/close positions |
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
+
+### Paper Trading (EXPERIMENTAL)
+
+> [!WARNING]
+> **EXPERIMENTAL — no verified public code path exists for live paper-order placement.**
+> These tools automate the live TradingView **paper-trading** order ticket via CDP DOM automation. Every selector is best-known but **UNVERIFIED** and MUST be calibrated at runtime with `trade_probe` before relying on `trade`. They may break with any TradingView UI update. They **never touch real brokerage accounts** — submissions are refused unless paper mode is detected (or `dry_run=true`, which never clicks submit).
+
+| Tool | Step |
+|------|------|
+| `trade` | Place a paper trade on the live order ticket (`action=market\|limit\|stop\|close`, `side=buy\|sell`, `qty`, `price`, `symbol`, `dry_run`) |
+| `trade_probe` | Dump the trading-panel DOM + `TradingViewApi` namespaces for selector calibration |
+| `trade_status` | Read paper-trading positions and open orders from the panel |
+
+First run `trade_probe` to inspect the actual DOM, then calibrate `SELECTORS` in `src/core/trading.js`. Use `trade --dry_run` (CLI: `tv trading trade --dry-run`) to validate the whole flow without ever submitting an order.
+
+#### Status (verified 2026-08, TradingView Desktop, NQ1! futures, paper account)
+
+| Capability | Status |
+|---|---|
+| Market order (`action=market`) | ✅ **Works live** — drives the one-click ticket (`div[class*="buyButton-"]` / `sellButton-` / `qty-`), sets qty, clicks Buy/Sell. Verified end-to-end (paper order placed). |
+| Close position (`action=close`) | ✅ **Works live** — clicks the account manager's Close button (`data-name="close-settings-cell-button"`). Verified. |
+| Read positions/orders (`trade_status`) | ✅ Works — reads `Paper.positions-table` / `Paper.orders-table`. Symbol/side parse; qty/price/pnl often `null` (row parser not fully calibrated). |
+| Paper-mode detection | ✅ Works — strongest signal is the `Paper.` data-name prefix on account-manager tables; re-checked fresh on every submission. |
+| Limit / Stop orders (`action=limit` / `action=stop`) | ⚠️ **Implemented but NOT verified end-to-end.** Code opens the in-window order-ticket dialog (right-click → "Create limit order…"; tabs Market/Limit/Stop, qty/price/TP/SL inputs, submit). Trigger is fragile: the chart context menu content depends on where you right-click (blank area → generic menu with "Create limit order…"; candle area → price menu "Sell/Buy N @ price …"). Needs a reliable right-click spot (typically with the bottom account-manager panel closed). |
+
+**Unfinished / known limitations (do before relying on it):**
+- Calibrate `SELECTORS` in `src/core/trading.js` against your TradingView build via `trade_probe`; selectors may break on any UI update.
+- Limit/stop end-to-end verification (right-click trigger + submit).
+- `trade_status` numeric cell parsing (qty/price/pnl).
+- **Hard dependency:** the MCP drives the locally-running, **foreground** TradingView Desktop app via CDP — it is NOT a server-side service. TradingView must be open and visible; small screens can hide the bottom account-manager button (the account switcher / "Paper Trading" trigger), which the tool relies on.
+
+#### Dependency & usage model
+
+This is a **foreground, interactive paper-trading harness** for manually-driven live strategy testing, not an automated server-side trading bot. It requires: TradingView Desktop running with `--remote-debugging-port=9223`, the Paper Trading account active, and the trading UI visible. Orders are gated behind paper-mode detection; `dry_run` never submits.
 
 ### Drawing, Alerts, UI Automation
 

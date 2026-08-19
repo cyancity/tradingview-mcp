@@ -40,6 +40,8 @@ const ACTIVE_TOOLS = [
   'ui_input', 'ui_find_element', 'ui_evaluate', 'layout_list', 'layout_switch',
   // batch
   'batch_run',
+  // trading (experimental)
+  'trade', 'trade_probe', 'trade_status',
 ];
 
 test('catalog: unique names and valid legacy replacement pointers', () => {
