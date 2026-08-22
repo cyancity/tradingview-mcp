@@ -132,41 +132,126 @@ export async function layoutSwitch({ name }) {
     new Promise(function(resolve) {
       try {
         var target = ${escaped};
-        if (/^\\d+$/.test(target)) { window.TradingViewApi.loadChartFromServer(target); resolve({success: true, method: 'loadChartFromServer', id: target, source: 'internal_api'}); return; }
-        window.TradingViewApi.getSavedCharts(function(charts) {
-          if (!charts || !Array.isArray(charts)) { resolve({success: false, error: 'getSavedCharts returned no data', source: 'internal_api'}); return; }
-          var match = null;
-          for (var i = 0; i < charts.length; i++) { var cname = charts[i].name || charts[i].title || ''; if (cname === target || cname.toLowerCase() === target.toLowerCase()) { match = charts[i]; break; } }
-          if (!match) { for (var j = 0; j < charts.length; j++) { var cn = (charts[j].name || charts[j].title || '').toLowerCase(); if (cn.indexOf(target.toLowerCase()) !== -1) { match = charts[j]; break; } } }
-          if (!match) { resolve({success: false, error: 'Layout "' + target + '" not found.', source: 'internal_api'}); return; }
-          var chartId = match.id || match.chartId;
-          window.TradingViewApi.loadChartFromServer(chartId);
-          resolve({success: true, method: 'loadChartFromServer', id: chartId, name: match.name || match.title, source: 'internal_api'});
-        });
-        setTimeout(function() { resolve({success: false, error: 'getSavedCharts timed out', source: 'internal_api'}); }, 5000);
-      } catch(e) { resolve({success: false, error: e.message, source: 'internal_api'}); }
+        var lcs = window.TradingViewApi && window.TradingViewApi._loadChartService;
+        if (!lcs) { resolve({ success: false, error: '_loadChartService not available', source: 'internal_api' }); return; }
+        var list = (lcs._state && lcs._state.value() && lcs._state.value().chartList) || [];
+        var entry = null;
+        // 1) numeric layout id match
+        if (/^\\d+$/.test(target)) {
+          for (var i = 0; i < list.length; i++) { if (String(list[i].id) === target) { entry = list[i]; break; } }
+        }
+        // 2) exact name match (case-insensitive)
+        if (!entry) {
+          var tl = String(target).toLowerCase();
+          for (var j = 0; j < list.length; j++) { if (String(list[j].name || '').toLowerCase() === tl) { entry = list[j]; break; } }
+        }
+        // 3) substring name match
+        if (!entry) {
+          var tl2 = String(target).toLowerCase();
+          for (var k = 0; k < list.length; k++) { var nm = String(list[k].name || '').toLowerCase(); if (nm.indexOf(tl2) !== -1) { entry = list[k]; break; } }
+        }
+        if (!entry) {
+          var avail = [];
+          for (var q = 0; q < list.length; q++) avail.push(String(list[q].name || ''));
+          resolve({ success: false, error: 'Layout "' + target + '" not found in chart list.', available: avail, source: 'internal_api' }); return;
+        }
+        var done = false;
+        var finish = function(ok, extra) {
+          if (done) return; done = true;
+          var obj = { success: ok, source: 'internal_api' };
+          for (var key in extra) obj[key] = extra[key];
+          resolve(obj);
+        };
+        // 真正的切换入口：entry.openAction() → loadChart(entry)（backend.loadLayout + loadLayoutState）。
+        // 旧代码用的 loadChartFromServer 只是 no-op，不会切换图表。
+        try {
+          var ret = entry.openAction();
+          if (ret && typeof ret.then === 'function') {
+            ret.then(function() { finish(true, { method: 'openAction', id: entry.id, name: entry.name, url: entry.url }); })
+              .catch(function(err) { finish(false, { error: 'openAction failed: ' + (err && err.message || err), method: 'openAction', id: entry.id, name: entry.name }); });
+          } else {
+            finish(true, { method: 'openAction', id: entry.id, name: entry.name, url: entry.url });
+          }
+        } catch (e) {
+          try {
+            var p2 = lcs.loadChartByUrl(entry.url);
+            if (p2 && typeof p2.then === 'function') {
+              p2.then(function() { finish(true, { method: 'loadChartByUrl', id: entry.id, name: entry.name, url: entry.url }); })
+                .catch(function(err) { finish(false, { error: 'loadChartByUrl failed: ' + (err && err.message || err), method: 'loadChartByUrl' }); });
+            } else { finish(true, { method: 'loadChartByUrl', id: entry.id, name: entry.name, url: entry.url }); }
+          } catch (e2) { finish(false, { error: e2.message, method: 'loadChartByUrl' }); }
+        }
+        setTimeout(function() { finish(false, { error: 'layout switch timed out', method: 'timeout' }); }, 10000);
+      } catch (e) { resolve({ success: false, error: e.message, source: 'internal_api' }); }
     })
   `);
   if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
 
-  // Handle "unsaved changes" confirmation dialog
+  // ---- 双兜底：等待图表真正加载，然后确认当前激活的 layout ----
+  await new Promise(r => setTimeout(r, 2500));
+  const active = await getActiveLayout();
+  const targetName = String(result?.name || name).toLowerCase();
+  const verified = !!active?.active?.layout && String(active.active.layout).toLowerCase() === targetName;
+
+  // Handle "unsaved changes" confirmation dialog (may appear during the switch)
   await new Promise(r => setTimeout(r, 500));
-  const dismissed = await evaluate(`
+  await evaluate(`
     (function() {
       var btns = document.querySelectorAll('button');
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
-        if (/open anyway|don't save|discard/i.test(text)) {
-          btns[i].click();
-          return true;
-        }
+        if (/open anyway|don't save|discard/i.test(text)) { btns[i].click(); return true; }
       }
       return false;
     })()
   `);
 
-  if (dismissed) await new Promise(r => setTimeout(r, 1000));
-  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
+  return {
+    success: true,
+    layout: result?.name || name,
+    layout_id: result?.id,
+    url: result?.url,
+    source: result?.source,
+    method: result?.method,
+    action: 'switched',
+    verified,
+    active_after: active?.active || null,
+  };
+}
+
+export async function getActiveLayout() {
+  const result = await evaluate(`
+    (function() {
+      try {
+        var lcs = window.TradingViewApi && window.TradingViewApi._loadChartService;
+        if (!lcs) return { error: '_loadChartService not available' };
+        var activeId = null;
+        var col = lcs._chartWidgetCollection;
+        try {
+          if (col && col.metaInfo && col.metaInfo.id && typeof col.metaInfo.id.value === 'function') activeId = col.metaInfo.id.value();
+        } catch (e) {}
+        if (activeId == null) {
+          var m = (location.href || '').match(/\\/chart\\/([^\\/?#]+)/);
+          activeId = m ? m[1] : null;
+        }
+        var list = (lcs._state && lcs._state.value() && lcs._state.value().chartList) || [];
+        var entry = null;
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (String(c.url || '') === String(activeId) || String(c.id) === String(activeId)) { entry = c; break; }
+        }
+        return {
+          active_chart_id: activeId,
+          layout: entry ? entry.name : null,
+          url: entry ? entry.url : null,
+          id: entry ? entry.id : null,
+          symbol: entry ? entry.symbol : null,
+          interval: entry ? entry.interval : null,
+        };
+      } catch (e) { return { error: e.message }; }
+    })()
+  `);
+  return { success: !result?.error, active: result || null };
 }
 
 export async function keyboard({ key, modifiers }) {

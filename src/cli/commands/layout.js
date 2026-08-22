@@ -15,5 +15,9 @@ register('layout', {
         return core.layoutSwitch({ name: positionals.join(' ') });
       },
     }],
+    ['active', {
+      description: 'Show which saved layout is currently active on the connected tab',
+      handler: () => core.getActiveLayout(),
+    }],
   ]),
 });

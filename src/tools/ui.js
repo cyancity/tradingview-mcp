@@ -89,6 +89,12 @@ export const tools = [
     },
     handler: ({ name }) => core.layoutSwitch({ name }),
   },
+  {
+    name: 'layout_active',
+    description: 'Show which saved layout is currently active on the connected tab',
+    schema: {},
+    handler: () => core.getActiveLayout(),
+  },
 
   // --- legacy aliases (TV_MCP_LEGACY=1) ---
   {
