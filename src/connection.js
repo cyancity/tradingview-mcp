@@ -110,10 +110,31 @@ export async function reconnectTo(targetId) {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  const charts = targets.filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+  if (charts.length === 0) return null;
+  if (charts.length === 1) return charts[0];
+
+  // Multiple chart tabs exist. /json/list order is NOT guaranteed to match the
+  // foreground tab, and there is no "active" field — so probing every chart
+  // target for document.visibilityState === 'visible' is the reliable way to
+  // find the tab the user is actually looking at. This is the ROOT CAUSE fix
+  // for "operations landing on the wrong chart" (tv state flipping symbols,
+  // pine edits hitting the wrong layout, layout switch going to a random tab).
+  for (const t of charts) {
+    let c = null;
+    try {
+      c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id });
+      await c.Runtime.enable();
+      const r = await c.Runtime.evaluate({ expression: 'document.visibilityState', returnByValue: true });
+      if (r?.result?.value === 'visible') return t;
+    } catch { /* probe failed, skip */ }
+    finally {
+      if (c) { try { await c.close(); } catch { /* ignore */ } }
+    }
+  }
+  // No foreground chart found (app minimized / active tab is not a chart):
+  // fall back to the first chart target.
+  return charts[0];
 }
 
 async function findTargetById(id) {
