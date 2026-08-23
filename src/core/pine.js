@@ -285,6 +285,64 @@ export function openViaDropdownExpr(name) {
 }
 
 /**
+ * Activate a script tab via the Pine editor's script-name dropdown, using the
+ * menu structure actually present in current TradingView Desktop builds
+ * (menu `[class*="contentDefaultAppearance"]`, rows `[class*="button-XNUivTou"]`).
+ * The legacy openViaDropdownExpr looked for role=menu/input/option which this
+ * build does not render, so it silently failed and left `set`/`compile` acting
+ * on whichever (possibly read-only community) script happened to be visible.
+ * Matches by full title OR shorttitle (the dropdown lists the shorttitle, e.g.
+ * "Ms" for "YOLO MS"). Returns { ok, already, matched } / { ok:false, step }.
+ */
+export function activateScriptViaDropdownExpr(name, short) {
+  const n = JSON.stringify(String(name || '').toLowerCase());
+  const s = JSON.stringify(String(short || '').toLowerCase());
+  return `
+  (function() {
+    return new Promise(function(resolve) {
+      var name = ${n};
+      var short = ${s};
+      var done = false;
+      function finish(r) { if (!done) { done = true; resolve(r); } }
+      function tryMenu() {
+        var menu = document.querySelector('[class*="contentDefaultAppearance"]');
+        if (!menu) return finish({ ok: false, step: 'menu' });
+        var rows = menu.querySelectorAll('[class*="button-XNUivTou"]');
+        var avail = [];
+        for (var i = 0; i < rows.length; i++) {
+          var t = (rows[i].textContent || '').trim();
+          avail.push(t.slice(0, 40));
+          var tl = t.toLowerCase();
+          if (tl === name || (short && tl === short) || (name && tl.indexOf(name) !== -1) || (short && tl.indexOf(short) !== -1)) {
+            rows[i].click();
+            return finish({ ok: true, matched: t.slice(0, 60) });
+          }
+        }
+        finish({ ok: false, step: 'no-match', available: avail.slice(0, 12) });
+      }
+      function start() {
+        var btn = document.querySelector('[class*="nameButton"]');
+        if (!btn) return finish({ ok: false, step: 'nameButton' });
+        var cur = (btn.textContent || '').trim().toLowerCase();
+        // Already on the target script — no-op, the buffer is the right one.
+        if (cur === name || (short && cur === short)) return finish({ ok: true, already: true });
+        btn.click();
+        setTimeout(tryMenu, 700);
+      }
+      start();
+      setTimeout(function() { finish({ ok: false, step: 'timeout' }); }, 5000);
+    });
+  })()
+  `;
+}
+
+/** Extract the indicator/strategy title and shorttitle from Pine source. */
+export function parsePineMeta(source) {
+  const m = String(source || '').match(/^(?:indicator|strategy|library)\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*)['"])?/);
+  return m ? { title: m[1], short: m[2] || '' } : null;
+}
+
+/**
  * Opens the Pine Editor panel and waits for a VISIBLE Monaco editor.
  * The legacy behavior treated mere DOM existence as "open", which allowed
  * all read/write ops to silently target a hidden editor instance. Now the
@@ -531,6 +589,18 @@ export async function getSource() {
 export async function setSource({ source }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw await editorUnavailableError('setSource');
+
+  // ROOT-CAUSE guard: before writing, make sure the editor's ACTIVE buffer is
+  // the script this source belongs to. Without this, setValue() can land in a
+  // read-only community script's buffer (e.g. "Smart Money Concepts [LuxAlgo]")
+  // while compile() re-fetches the saved script and reverts everything to v5.
+  const meta = parsePineMeta(source);
+  if (meta?.title) {
+    try {
+      const act = await evaluateAsync(activateScriptViaDropdownExpr(meta.title, meta.short));
+      if (act?.ok) await new Promise(r => setTimeout(r, 700));
+    } catch { /* best-effort: fall through to setValue */ }
+  }
 
   const escaped = JSON.stringify(source);
   const set = await evaluate(`
@@ -922,6 +992,13 @@ export async function openScript({ name }) {
     // Best-effort: open via the Pine toolbar script dropdown.
     const dropdownResult = await evaluateAsync(openViaDropdownExpr(result.name));
     tabActivated = dropdownResult?.ok === true;
+  }
+  if (!tabActivated) {
+    // Fallback: the script-name dropdown menu actually rendered by current
+    // builds ([class*="contentDefaultAppearance"] + button-XNUivTou rows).
+    const short = parsePineMeta(result.source)?.short || '';
+    const menuResult = await evaluateAsync(activateScriptViaDropdownExpr(result.name, short));
+    tabActivated = menuResult?.ok === true;
   }
 
   if (!tabActivated) {
