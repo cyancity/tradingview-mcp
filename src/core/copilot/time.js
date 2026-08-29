@@ -134,7 +134,6 @@ export function findBarBySemantics(bars, desc) {
   else return null;
 
   let bestIdx = -1;
-  let bestScore = -Infinity;
 
   if (type === 'bullish') {
     let maxBody = -Infinity;

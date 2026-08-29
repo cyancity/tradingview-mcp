@@ -43,8 +43,10 @@
 
 - [x] 已完成: 分支 `feature/trading-copilot` 创建，主分支进展盘点，现有能力摸底，计划草案 + 用户评审（2026-08-29）
 - [x] 已确认: 7 个待讨论问题全部拍板（见决策记录）
-- [ ] 进行中: Goal 1 底座开发（绘图扩展 + time.js + context.js）
-- [ ] 待办: Goal 2 ICT引擎/Analyzer + Goal 3 Skill/测试/验收
+- [x] 已完成: Goal1 底座 — 绘图扩展(ray/long/short/points)+time(NY)+context(并行) (`944e4b4`)
+- [x] 已完成: Goal2 引擎 — ICT 6模块+Analyzer(含免责/多周期按需/视觉回写)+copilot_analyze MCP/CLI+registry (`4512456`)
+- [x] 已完成: Goal3 Skill/测试/验收 — SKILL.md + 5个测试(229 passed) + lint/tools:report 全绿
+- [x] 待提交: Goal3 commit + push
 
 ---
 

@@ -37,9 +37,11 @@ const ACTIVE_TOOLS = [
   // alerts / watchlist
   'alert_create', 'alert_manage', 'watchlist_get', 'watchlist_add', 'watchlist_remove',
   // ui
-  'ui_input', 'ui_find_element', 'ui_evaluate', 'layout_list', 'layout_switch',
+  'ui_input', 'ui_find_element', 'ui_evaluate', 'layout_list', 'layout_switch', 'layout_active',
   // batch
   'batch_run',
+  // copilot
+  'copilot_analyze',
 ];
 
 test('catalog: unique names and valid legacy replacement pointers', () => {
@@ -95,7 +97,7 @@ test('TV_MCP_PROFILE=data exposes only data + health tools', () => {
 test('TV_MCP_PROFILE=quant covers data/chart/indicators/capture/batch/health', () => {
   const { selected } = resolveSelection({ TV_MCP_PROFILE: 'quant' });
   const groups = new Set(catalog.filter((t) => selected.has(t.name)).map((t) => t.group));
-  assert.deepEqual([...groups].sort(), ['batch', 'capture', 'chart', 'data', 'health', 'indicators']);
+  assert.deepEqual([...groups].sort(), ['batch', 'capture', 'chart', 'copilot', 'data', 'health', 'indicators']);
 });
 
 test('TV_MCP_PROFILE=minimal is the curated high-frequency set', () => {
