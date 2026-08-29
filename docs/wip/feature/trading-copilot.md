@@ -41,9 +41,10 @@
 
 ## 当前状态
 
-- [x] 已完成: 分支 `feature/trading-copilot` 创建，主分支进展盘点（20 分支已合，仅 1 未合），现有工具/绘图/数据能力摸底，`docs/wip` 初始化
-- [ ] 进行中: 计划文档撰写与评审（本文件），待用户讨论后定 Goal
-- [ ] 待办: 见“下一步（接手指南）”与“Goal 拆解建议”
+- [x] 已完成: 分支 `feature/trading-copilot` 创建，主分支进展盘点，现有能力摸底，计划草案 + 用户评审（2026-08-29）
+- [x] 已确认: 7 个待讨论问题全部拍板（见决策记录）
+- [ ] 进行中: Goal 1 底座开发（绘图扩展 + time.js + context.js）
+- [ ] 待办: Goal 2 ICT引擎/Analyzer + Goal 3 Skill/测试/验收
 
 ---
 
@@ -256,18 +257,15 @@ export const tools = [{
 
 ---
 
-### 7. 评估的其他形态（讨论后定二期）
+### 7. 评估的其他形态（二期）
 
 | 形态 | 描述 | 成本 | 建议 |
 |---|---|---|---|
-| 自动绘图回写 | 分析后自动在图上画 FVG/OB 矩形 | 低（已有 draw） | ✅ MVP 可选做 |
-| 多周期联动 | 1h 结构 + 15m 入场 联合分析 | 中（需多次 ohlcv） | 二期 |
+| 自动绘图回写 | 分析后自动在图上画 FVG/OB 矩形 | 低（已有 draw） | ✅ MVP 做视觉确认（带验收） |
+| 多周期联动 | 1h 结构 + 15m 入场 联合分析 | 中（需多次 ohlcv） | ✅ MVP 按需：用户提及多周期才触发 |
 | 多品种扫描 | `batch_run` + copilot 批量 | 低 | 二期，复用 multi-symbol-scan |
 | 实时流订阅 | `stream.js` 轮询推送 | 中 | 二期，需新 MCP 工具 |
 | 语音/图片输入 | 截图 + VLM 分析 | 高 | 不做 |
-
----
-
 ## 工具/Skill/测试 清单
 
 ### 新增/修改文件
@@ -346,25 +344,27 @@ export const tools = [{
 
 ---
 
-## 待讨论问题（需要你拍板）
+## 待讨论问题
 
-1. **分析语气与边界**：ICT 分析是否允许给出“偏多/偏空”倾向，还是严格只陈述事实+结构？是否需要每份报告强制免责声明？
-2. **时间语义范围**：除中文外是否需支持英文？“纽约开盘”是否按 `America/New_York` 固定，还是跟随 TV 的 `America/New_York` 会话？
-3. **绘图类型**：除 `矩形/趋势线/射线/Long/Short` 外，是否需要 `fib 回撤 / 平行通道`？初版是否先只做这 5 种？
-4. **输出形式**：TUI 报告用 Markdown 表格 + 列表是否足够？是否需要同时回写绘图到 TV（如自动标 FVG 矩形）？
-5. **数据量**：默认 `max_bars=200` 是否合适？是否需要支持多周期（例如先看日线结构再看 1h 入场）？
-6. **Skill 触发**：是否希望输入 `“用ICT分析一下”` 就自动走 copilot，还是必须显式 `tv copilot analyze`？
-7. **测试环境**：e2e 是否复用现有 `tests/e2e.test.js` 的 CDP 直连，还是新增独立 `copilot.e2e.test.js`？
+已全部拍板，无遗留。
 
 ---
 
 ## 下一步（接手指南）
 
-1. **讨论**：与用户逐条确认“待讨论问题” 7 项，记录结论到“决策记录”
-2. **定 Goal**：将“Goal 拆解建议”拆为正式 Goal（建议直接用上述 3 Goal 或合并），写入 `docs/wip` 并同步 panel
-3. **开干**：按 Goal 1→2→3 顺序，每 Goal 开 subagent 并行，`pnpm test:unit` + `pnpm lint` 门禁
-4. **验证**：`git status` 干净、`pnpm tools:report` 工具数 +1、`tv copilot analyze --help` 可见
+1. Goal 1：绘图扩展 + time.js + context.js（本轮）
+2. Goal 2：ICT + Analyzer + copilot 工具/CLI
+3. Goal 3：Skill + 视觉回写 + 测试验收
+4. 验证：`pnpm lint && pnpm test:unit` 全绿，`tv copilot analyze --help` 可见
 
 ## 决策记录
 
-- 2026-08-29: 创建分支 `feature/trading-copilot`，完成现状盘点与初版计划草案，待评审
+- 2026-08-29: 创建分支 `feature/trading-copilot`，完成现状盘点与初版计划草案
+- 2026-08-29 拍板 7 项：
+  1. 可给 bias，但必须有事实佐证 + 强制免责声明（disclaimer 每份报告末尾）
+  2. 时间以纽约时间 America/New_York 为准，展示双时区但计算用 NY
+  3. 绘图仅 5 种：rectangle / trend_line / ray / long_position / short_position，不加 fib/通道
+  4. 提供视觉确认（自动回写 FVG/OB/流动性矩形），但需视觉测试与验收流程保证“文字结果 == 绘图位置”，不一致即 bug
+  5. 默认 max_bars=200，默认用当前周期；仅当用户显式提及多周期（如“看 4H 结构 / 15m 入场”）才拉多周期数据
+  6. 默认自动走 copilot：未指定策略 → ICT，任何提问都先走 copilot_analyze
+  7. 测试新增独立文件：copilot_time / copilot_ict / copilot_analyzer / drawing，且新建 copilot.e2e.test.js

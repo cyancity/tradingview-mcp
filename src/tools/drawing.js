@@ -5,23 +5,27 @@ import * as core from '../core/drawing.js';
 // pre-v3 tool names, registered only when TV_MCP_LEGACY=1.
 export const group = 'drawing';
 
+const pointSchema = z.object({ time: z.coerce.number(), price: z.coerce.number() });
+const pointsSchema = z.array(pointSchema);
+
 export const tools = [
   {
     name: 'draw',
-    description: 'Chart drawings. action=shape → draw with `shape` (horizontal_line, vertical_line, trend_line, rectangle, text) at `point` {time, price} (+ `point2` for two-point shapes, `text`, `overrides` JSON). action=list / clear / remove (`entity_id`) / properties (`entity_id`).',
+    description: 'Chart drawings. action=shape → draw with `shape` (horizontal_line, vertical_line, trend_line, rectangle, ray, long_position, short_position, text, arrow) at `point` {time, price} (+ `point2` for two-point shapes, `points` [{time, price}] for 1-3 point shapes incl. ray/long_position/short_position, `text`, `overrides` JSON). action=list / clear / remove (`entity_id`) / properties (`entity_id`).',
     schema: {
       action: z.enum(['shape', 'list', 'clear', 'remove', 'properties']).describe('Drawing operation'),
-      shape: z.string().optional().describe('Shape type (action=shape): horizontal_line, vertical_line, trend_line, rectangle, text'),
-      point: z.object({ time: z.coerce.number(), price: z.coerce.number() }).optional().describe('First point {time: unix_timestamp, price} (action=shape)'),
-      point2: z.object({ time: z.coerce.number(), price: z.coerce.number() }).optional().describe('Second point for two-point shapes (trend_line, rectangle)'),
+      shape: z.string().optional().describe('Shape type (action=shape): horizontal_line, vertical_line, trend_line, rectangle, ray, long_position, short_position, text, arrow'),
+      point: pointSchema.optional().describe('First point {time: unix_timestamp, price} (action=shape)'),
+      point2: pointSchema.optional().describe('Second point for two-point shapes (trend_line, rectangle, ray, arrow)'),
+      points: pointsSchema.optional().describe('Points array [{time, price}]; if provided takes precedence over point/point2. Length per shape: 1 for horizontal_line/vertical_line/text, 2 for trend_line/rectangle/ray/arrow, 3 for long_position/short_position'),
       overrides: z.string().optional().describe('JSON string of style overrides (e.g., \'{"linecolor": "#ff0000", "linewidth": 2}\')'),
       text: z.string().optional().describe('Text content for text shapes'),
       entity_id: z.string().optional().describe('Drawing entity id (action=remove/properties, from draw action=list)'),
     },
-    handler: async ({ action, shape, point, point2, overrides, text, entity_id }) => {
+    handler: async ({ action, shape, point, point2, points, overrides, text, entity_id }) => {
       if (action === 'shape') {
-        if (!shape || !point) throw new Error('action=shape requires `shape` and `point`.');
-        return core.drawShape({ shape, point, point2, overrides, text });
+        if (!shape || (!point && !points)) throw new Error('action=shape requires `shape` and `point`.');
+        return core.drawShape({ shape, point, point2, points, overrides, text });
       }
       if (action === 'list') return core.listDrawings();
       if (action === 'clear') return core.clearAll();
@@ -38,13 +42,14 @@ export const tools = [
     description: 'Draw a shape/line on the chart',
     legacy: 'draw',
     schema: {
-      shape: z.string().describe('Shape type: horizontal_line, vertical_line, trend_line, rectangle, text'),
-      point: z.object({ time: z.coerce.number(), price: z.coerce.number() }).describe('{ time: unix_timestamp, price: number }'),
-      point2: z.object({ time: z.coerce.number(), price: z.coerce.number() }).optional().describe('Second point for two-point shapes'),
+      shape: z.string().describe('Shape type: horizontal_line, vertical_line, trend_line, rectangle, ray, long_position, short_position, text, arrow'),
+      point: pointSchema.describe('{ time: unix_timestamp, price: number }'),
+      point2: pointSchema.optional().describe('Second point for two-point shapes (trend_line, rectangle, ray, arrow)'),
+      points: pointsSchema.optional().describe('Points array [{time, price}] takes precedence over point/point2'),
       overrides: z.string().optional().describe('JSON string of style overrides'),
       text: z.string().optional().describe('Text content for text shapes'),
     },
-    handler: ({ shape, point, point2, overrides, text }) => core.drawShape({ shape, point, point2, overrides, text }),
+    handler: ({ shape, point, point2, points, overrides, text }) => core.drawShape({ shape, point, point2, points, overrides, text }),
   },
   {
     name: 'draw_list',
