@@ -32,9 +32,10 @@ import * as alerts from './alerts.js';
 import * as watchlist from './watchlist.js';
 import * as ui from './ui.js';
 import * as batch from './batch.js';
+import * as copilot from './copilot.js';
 
 // Fixed order = registration order = tools/list order.
-const DOMAINS = [health, chart, indicators, data, capture, pine, tab, pane, replay, drawing, alerts, watchlist, ui, batch];
+const DOMAINS = [health, chart, indicators, data, capture, pine, tab, pane, replay, drawing, alerts, watchlist, ui, batch, copilot];
 
 // Tools always exposed in lazy mode next to tv_call/tv_tools_catalog.
 const LAZY_CORE = [
@@ -60,7 +61,7 @@ const MINIMAL = [
 // Presets map to tokens: group names, tool names, or other presets.
 export const PROFILES = {
   full: null, // all groups (default)
-  quant: ['data', 'chart', 'indicators', 'capture', 'batch', 'health'],
+  quant: ['data', 'chart', 'indicators', 'capture', 'batch', 'health', 'copilot'],
   data: ['data', 'health'],
   chart: ['chart', 'indicators', 'tab', 'pane', 'capture', 'health'],
   pine: ['pine', 'tab', 'health'],
