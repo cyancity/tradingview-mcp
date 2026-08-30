@@ -46,7 +46,8 @@
 - [x] 已完成: Goal1 底座 — 绘图扩展(ray/long/short/points)+time(NY)+context(并行) (`944e4b4`)
 - [x] 已完成: Goal2 引擎 — ICT 6模块+Analyzer(含免责/多周期按需/视觉回写)+copilot_analyze MCP/CLI+registry (`4512456`)
 - [x] 已完成: Goal3 Skill/测试/验收 — SKILL.md + 5个测试(229 passed) + lint/tools:report 全绿
-- [x] 待提交: Goal3 commit + push
+- [x] 已完成: 真机验收阻塞排障 — TV Wayland 分数缩放 resize 死锁，X11 方案修复并固化（见决策记录 2026-08-31）
+- [ ] 进行中: 用户按验收清单走 A-D 四场景（TV 已可用，`tv copilot analyze` 待真机演示）
 
 ---
 
@@ -361,6 +362,7 @@ export const tools = [{
 
 ## 决策记录
 
+- 2026-08-31: **TV「一开 CDP 就卡死」排查结案** —— 与 copilot 代码/CDP 连接无关。根因：Electron 原生 Wayland + AMD(amdgpu) + Hyprland 分数缩放(1.875) 下，任何窗口 resize（退全屏/平铺抢空间）导致 GPU 线程死锁挂起（无 core dump，非 crash）。修复：`--ozone-platform=x11 --force-device-scale-factor=1.875`。已固化三处：① `~/.local/share/applications/tradingview.desktop`（图标启动自带修复参数+9223）② `src/core/health.js` launch（Linux 分支自动带参，`TV_LAUNCH_ARGS=''` 可禁用，`TV_DEVICE_SCALE_FACTOR` 可改缩放）③ 本文档。验收方式：用户确认 X11 方案 resize 瞬时卡顿但不再死锁。
 - 2026-08-29: 创建分支 `feature/trading-copilot`，完成现状盘点与初版计划草案
 - 2026-08-29 拍板 7 项：
   1. 可给 bias，但必须有事实佐证 + 强制免责声明（disclaimer 每份报告末尾）

@@ -360,6 +360,18 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
+  if (platform === 'linux') {
+    // Electron on native Wayland + AMD (amdgpu) + fractional monitor scale deadlocks
+    // the GPU thread on ANY window resize (enter/exit fullscreen, tiling layout
+    // changes) — the app hangs with no crash dump. XWayland resize is robust;
+    // TV scales itself via --force-device-scale-factor so text stays sharp.
+    // Verified fix for TV 3.3.0 / Electron 38 on Hyprland. Override the scale
+    // factor (or opt out entirely) with TV_LAUNCH_ARGS='' if your setup differs.
+    if (process.env.TV_LAUNCH_ARGS !== '') {
+      const scale = process.env.TV_DEVICE_SCALE_FACTOR || '1.875';
+      cdpArgs.push('--ozone-platform=x11', `--force-device-scale-factor=${scale}`);
+    }
+  }
   let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
   let info = null;
   let usedLocalCopy = false;
