@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>回测第一卷</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;700;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#F7F6F3; --surface:#FFFFFF; --ink:#1A1C22; --ink-soft:#5B6070; --ink-faint:#9AA0AE;
+  --line:#E3E1DB; --line-strong:#C9C6BD;
+  --accent:#0E5F58;
+  --bull:#0C7A5B; --bull-soft:#DCEFE8;
+  --bear:#B23A28; --bear-soft:#F7E4DF;
+  --warn:#8A6D1F; --warn-soft:#F3ECD8;
+  --neutral-cell:#E8E7E2;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15171C; --surface:#1C1F26; --ink:#E8E9EC; --ink-soft:#A7ACB9; --ink-faint:#6B7180;
+    --line:#2B2F38; --line-strong:#3C414D;
+    --accent:#4FB3A6;
+    --bull:#3ECC9C; --bull-soft:#15352C;
+    --bear:#E86A52; --bear-soft:#3A211C;
+    --warn:#D8BC6A; --warn-soft:#332C18;
+    --neutral-cell:#2A2D35;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15171C; --surface:#1C1F26; --ink:#E8E9EC; --ink-soft:#A7ACB9; --ink-faint:#6B7180;
+  --line:#2B2F38; --line-strong:#3C414D;
+  --accent:#4FB3A6;
+  --bull:#3ECC9C; --bull-soft:#15352C;
+  --bear:#E86A52; --bear-soft:#3A211C;
+  --warn:#D8BC6A; --warn-soft:#332C18;
+  --neutral-cell:#2A2D35;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'IBM Plex Sans','PingFang SC','Microsoft YaHei',sans-serif;
+  font-size:15px;line-height:1.65;}
+.wrap{max-width:1060px;margin:0 auto;padding:48px 28px 72px;}
+
+/* ---------- header ---------- */
+header{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:34px;}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;color:var(--accent);
+  text-transform:uppercase;margin-bottom:10px;}
+h1{font-family:'Spectral','Noto Serif SC',serif;font-weight:900;font-size:clamp(30px,5vw,44px);
+  line-height:1.12;margin:0 0 10px;text-wrap:balance;}
+.subtitle{color:var(--ink-soft);font-size:15px;max-width:62ch;}
+.meta-row{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:16px;
+  font-family:var(--mono);font-size:12px;color:var(--ink-faint);}
+.meta-row b{color:var(--ink-soft);font-weight:500;}
+
+/* ---------- stat tiles ---------- */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:30px 0 8px;}
+@media(max-width:820px){.stats{grid-template-columns:repeat(2,1fr);}}
+.tile{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--line-strong);
+  padding:13px 15px 11px;}
+.tile.k{border-top-color:var(--accent);}
+.tile.bad{border-top-color:var(--bear);}
+.tile .n{font-family:var(--mono);font-weight:600;font-size:24px;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;line-height:1.15;}
+.tile.bad .n{color:var(--bear);}
+.tile .l{font-size:11.5px;color:var(--ink-soft);margin-top:3px;}
+.tldr{background:var(--surface);border-left:3px solid var(--accent);padding:16px 20px;
+  margin:18px 0 40px;font-size:15px;}
+.tldr b{color:var(--accent);}
+
+/* ---------- sections ---------- */
+h2{font-family:'Spectral','Noto Serif SC',serif;font-weight:700;font-size:24px;
+  margin:46px 0 6px;text-wrap:balance;}
+h2 .no{color:var(--ink-faint);font-weight:500;font-size:.75em;margin-right:10px;}
+.sub{color:var(--ink-soft);font-size:14px;margin:0 0 18px;max-width:70ch;}
+
+/* ---------- trade table ---------- */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);background:var(--surface);}
+table{border-collapse:collapse;width:100%;min-width:900px;
+  font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;}
+th{font-family:'IBM Plex Sans',sans-serif;font-size:11px;letter-spacing:.08em;color:var(--ink-faint);
+  text-transform:uppercase;font-weight:600;text-align:left;padding:9px 10px;
+  border-bottom:1px solid var(--line-strong);white-space:nowrap;}
+td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr.hl{background:color-mix(in srgb,var(--bear) 5%,transparent);}
+.outcome{display:inline-block;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.03em;}
+.o-sl{background:var(--bear-soft);color:var(--bear);}
+.o-ex{background:var(--neutral-cell);color:var(--ink-soft);}
+.o-cn{background:var(--warn-soft);color:var(--warn);}
+.r-neg{color:var(--bear);font-weight:600;}
+.r-na{color:var(--ink-faint);}
+.dash{color:var(--ink-faint);}
+/* MTF state cells */
+.mtf{display:inline-flex;gap:2px;}
+.mtf span{width:22px;height:18px;display:inline-flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:600;border-radius:2px;}
+.st2{background:var(--bull-soft);color:var(--bull);}
+.st1{background:var(--bull-soft);color:var(--bull);opacity:.82;}
+.st-2{background:var(--bear-soft);color:var(--bear);}
+.st-1{background:var(--bear-soft);color:var(--bear);opacity:.82;}
+.st0{background:var(--neutral-cell);color:var(--ink-faint);}
+.mtf-legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-family:var(--mono);
+  font-size:11px;color:var(--ink-faint);align-items:center;}
+.mtf-legend .mtf span{width:auto;height:auto;padding:1px 6px;background:var(--neutral-cell);color:var(--ink-soft);}
+
+/* ---------- attribution cards ---------- */
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;}
+@media(max-width:820px){.cards{grid-template-columns:1fr;}}
+.card{background:var(--surface);border:1px solid var(--line);padding:18px 20px;}
+.card h3{margin:0 0 4px;font-size:16.5px;font-family:'Spectral','Noto Serif SC',serif;font-weight:700;}
+.card .sig{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);margin-bottom:10px;}
+.card p{margin:0;font-size:13.5px;color:var(--ink-soft);}
+.card .tally{font-family:var(--mono);font-size:12px;margin-top:12px;padding-top:10px;
+  border-top:1px dashed var(--line-strong);color:var(--ink);}
+.card.a{border-top:3px solid var(--bear);}
+.card.b{border-top:3px solid var(--bear);}
+.card.c{border-top:3px solid var(--warn);}
+.card .tally b{color:var(--bear);}
+
+/* ---------- thesis ---------- */
+.thesis{background:var(--surface);border:1px solid var(--line-strong);padding:26px 28px;margin-top:16px;}
+.thesis h3{font-family:'Spectral','Noto Serif SC',serif;font-size:20px;margin:0 0 4px;}
+.thesis .lead{color:var(--ink-soft);font-size:14px;margin:0 0 18px;}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:820px){.duo{grid-template-columns:1fr;}}
+.panel{border:1px solid var(--line);padding:16px 18px;}
+.panel h4{margin:0 0 8px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+  font-family:var(--mono);font-weight:600;}
+.panel.win h4{color:var(--bull);}
+.panel.lose h4{color:var(--bear);}
+.panel ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--ink-soft);}
+.panel li{margin-bottom:6px;}
+.panel b{color:var(--ink);}
+.quote{margin:18px 0 0;padding:12px 16px;background:color-mix(in srgb,var(--accent) 7%,transparent);
+  border-left:3px solid var(--accent);font-size:13.5px;color:var(--ink-soft);}
+.quote b{color:var(--accent);}
+
+/* ---------- caveats ---------- */
+.caveats{border:1px solid var(--warn);background:color-mix(in srgb,var(--warn) 6%,transparent);
+  padding:18px 22px;margin-top:16px;}
+.caveats h3{margin:0 0 8px;font-size:15px;color:var(--warn);font-family:'IBM Plex Sans',sans-serif;}
+.caveats ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--ink-soft);}
+.caveats li{margin-bottom:5px;}
+
+/* ---------- next steps ---------- */
+.next{counter-reset:step;list-style:none;margin:16px 0 0;padding:0;}
+.next li{counter-increment:step;position:relative;padding:10px 0 10px 44px;
+  border-bottom:1px solid var(--line);font-size:14px;color:var(--ink-soft);}
+.next li:last-child{border-bottom:none;}
+.next li::before{content:counter(step,decimal-leading-zero);position:absolute;left:0;top:10px;
+  font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:600;}
+.next b{color:var(--ink);}
+
+footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:11px;color:var(--ink-faint);line-height:1.7;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">YOLO-MS · NQ1! 5m · 全复刻 live 撮合</div>
+  <h1>回测第一卷</h1>
+  <p class="subtitle">首批 11 个 MS 信号的完整复盘：逐笔明细、止损归因，和一个比胜负更重要的结构发现。撮合引擎完整复刻 OKX 实盘语义（limit@结构位、15 分钟 TTL、规则 C 位移、成交锚定 TP/SL）。</p>
+  <div class="meta-row">
+    <span>窗口 <b>08-28 10:20 → 08-31 19:30</b>（北京时间）</span>
+    <span>数据 <b>315 根 5m bars</b>（信号账本直读自图表指标）</span>
+    <span>口径 <b>1 张 NQ · $20/点 · 毛收益（无费用）</b></span>
+    <span>引擎 <b>engine v1 + L1–L9 语义</b></span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="tile k"><div class="n">11</div><div class="l">信号总数（B4 / FB1 / S5 / FS1）</div></div>
+  <div class="tile k"><div class="n">7</div><div class="l">成交笔数</div></div>
+  <div class="tile bad"><div class="n">0 / 7</div><div class="l">胜 / 负（成交笔）</div></div>
+  <div class="tile bad"><div class="n">−1.000R</div><div class="l">每笔期望（结构止损刚性）</div></div>
+  <div class="tile bad"><div class="n">−$6,360</div><div class="l">已实现（1 张口径）</div></div>
+</div>
+
+<div class="tldr">
+  <b>一句话结论：</b>7 笔成交全部止损、0 笔止盈——但独立逐 bar 重放核实<b>引擎无系统偏差，亏损是真实行情</b>。
+  更重要的发现在成交之外：<b>3 笔没成交（EXPIRED）的信号里，2 笔方向完全正确</b>，错过的合计约 +6R。
+  挂单在结构位的回踩成交，呈现教科书级的<b>逆向选择</b>——回踩给你的都是立刻反向的行情，不回踩的都是趋势延续。
+</div>
+
+<h2><span class="no">01</span>逐笔明细</h2>
+<p class="sub">每个信号入场时点的多周期结构状态（1m→1d）随信号一并从指标导出。<span class="dash">色格：</span>绿=多头确认/待确认，红=空头，灰=中性。第一笔早于账本读取窗口，结构状态未记录。</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr>
+  <th>#</th><th>时间</th><th>类型</th><th>方向</th><th>挂单价</th><th>成交价</th><th>出场</th><th>触发价</th><th>结果</th><th>R</th><th>$</th><th>结构 1m–1d</th>
+</tr></thead>
+<tbody>
+  <tr class="hl">
+    <td>1</td><td>08-28 10:20</td><td>S</td><td>空</td><td>29,570.00</td><td>29,659.50</td><td>止损</td><td>29,680.25</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−415</td>
+    <td class="dash">—（窗口外）</td>
+  </tr>
+  <tr>
+    <td>2</td><td>08-28 17:50</td><td>B</td><td>多</td><td>29,672.75</td><td class="dash">—</td><td>占用拒收</td><td class="dash">—</td>
+    <td><span class="outcome o-cn">CENSORED</span></td><td class="r-na">—</td><td class="r-na">—</td>
+    <td><span class="mtf"><span class="st2">2</span><span class="st1">1</span><span class="st1">1</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr>
+    <td>3</td><td>08-28 21:05</td><td>S</td><td>空</td><td>29,643.75</td><td class="dash">—</td><td>超时撤单</td><td class="dash">—</td>
+    <td><span class="outcome o-ex">EXPIRED</span></td><td class="r-na">—</td><td class="r-na">—</td>
+    <td><span class="mtf"><span class="st-1">−1</span><span class="st-2">−2</span><span class="st1">1</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr class="hl">
+    <td>4</td><td>08-29 03:20</td><td>B</td><td>多</td><td>29,634.75</td><td>29,634.75</td><td>止损</td><td>29,613.00</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−435</td>
+    <td><span class="mtf"><span class="st1">1</span><span class="st1">1</span><span class="st-2">−2</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr class="hl">
+    <td>5</td><td>08-29 05:40</td><td>FB</td><td>多</td><td>29,681.75</td><td>29,681.75</td><td>止损</td><td>29,584.75</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−1,940</td>
+    <td><span class="mtf"><span class="st2">2</span><span class="st1">1</span><span class="st1">1</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr class="hl">
+    <td>6</td><td>08-29 06:10</td><td>S</td><td>空</td><td>29,562.75</td><td>29,562.75</td><td>止损</td><td>29,632.75</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−1,400</td>
+    <td><span class="mtf"><span class="st-1">−1</span><span class="st-2">−2</span><span class="st-2">−2</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr>
+    <td>7</td><td>08-29 06:40</td><td>B</td><td>多</td><td>29,703.25</td><td class="dash">—</td><td>超时撤单</td><td class="dash">—</td>
+    <td><span class="outcome o-ex">EXPIRED</span></td><td class="r-na">—</td><td class="r-na">—</td>
+    <td><span class="mtf"><span class="st1">1</span><span class="st1">1</span><span class="st-2">−2</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr class="hl">
+    <td>8</td><td>08-29 09:00</td><td>S</td><td>空</td><td>29,475.00</td><td>29,475.00</td><td>止损</td><td>29,525.00</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−1,000</td>
+    <td><span class="mtf"><span class="st-1">−1</span><span class="st-1">−1</span><span class="st-2">−2</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr class="hl">
+    <td>9</td><td>08-29 12:40</td><td>B</td><td>多</td><td>29,507.00</td><td>29,507.00</td><td>止损</td><td>29,484.00</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−460</td>
+    <td><span class="mtf"><span class="st1">1</span><span class="st2">2</span><span class="st-1">−1</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr>
+    <td>10</td><td>08-31 15:10</td><td>S</td><td>空</td><td>29,428.00</td><td class="dash">—</td><td>超时撤单</td><td class="dash">—</td>
+    <td><span class="outcome o-ex">EXPIRED</span></td><td class="r-na">—</td><td class="r-na">—</td>
+    <td><span class="mtf"><span class="st-1">−1</span><span class="st-1">−1</span><span class="st-1">−1</span><span class="st1">1</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+  <tr class="hl">
+    <td>11</td><td>08-31 18:30</td><td>FS</td><td>空</td><td>29,302.25</td><td>29,302.25</td><td>止损</td><td>29,337.75</td>
+    <td><span class="outcome o-sl">SL</span></td><td class="r-neg">−1.0</td><td class="r-neg">−710</td>
+    <td><span class="mtf"><span class="st-1">−1</span><span class="st-1">−1</span><span class="st-1">−1</span><span class="st-2">−2</span><span class="st-1">−1</span><span class="st-2">−2</span></span></td>
+  </tr>
+</tbody>
+</table>
+</div>
+<div class="mtf-legend">
+  <span>结构状态格：</span>
+  <span class="mtf"><span>1m</span><span>5m</span><span>15m</span><span>1h</span><span>4h</span><span>1d</span></span>
+  <span>2=多头待确认 · 1=多头确认 · −1=空头确认 · −2=空头待确认 · 0=中性</span>
+</div>
+
+<h2><span class="no">02</span>止损归因</h2>
+<p class="sub">7 笔止损不是一种病，是三种。按入场时点的结构签名分类——前两类已经可以用明确的 MTF 状态组合描述。</p>
+
+<div class="cards">
+  <div class="card a">
+    <h3>类型 A · HTF 压制下的 LONG</h3>
+    <div class="sig">签名：h4=空头确认 + 1d=空头待确认，且多伴随 15m 空头</div>
+    <p>1m/5m 刚转多、指标给出 B/FB，但 4 小时与日线仍被空头占据。这就是「小周期出了很好的 setup，也抵挡不住大周期压制」的量化形态——8 月 29 日瀑布日里做多信号全军覆没。成交的 3 笔多单（#4/#5/#9）里 2 笔 15m 同时还是空头。</p>
+    <div class="tally">命中率：<b>3/3 全灭</b>（#4 R21 · #5 R97 · #9 R23）· 另有 1 笔多单被占用删失</div>
+  </div>
+  <div class="card b">
+    <h3>类型 B · 扫损反弹下的 SHORT</h3>
+    <div class="sig">签名：1h=多头确认（与实际趋势背离）期间的反向反弹</div>
+    <p>价格三天跌了 500 点，1 小时结构却停留在多头——这个背离窗口里，空单在结构位回踩成交后，全部被反弹扫掉止损，扫完继续跌。#8 最典型：09:45 反弹到 29,528 打掉 29,525 的止损，随后一整天跌到 29,300 下方。#11 是例外：1h 已转空头待确认，仍被扫。</p>
+    <div class="tally">命中率：<b>3/3 强匹配</b>（#6/#8 h1=多头；#1 无状态记录）· #11 为例外样本</div>
+  </div>
+  <div class="card c" style="grid-column:1/-1">
+    <h3>类型 C · 垃圾信号（R 过小）</h3>
+    <div class="sig">签名：R = |entry − sl| 小于最小阈值（本例 #3 仅 1 点）</div>
+    <p>结构线被跌穿后价格贴着线走，止盈止损只有 1–2 点——这不是交易是掷硬币加手续费。实盘网关本来就有 R_TOO_SMALL 拒单门，回测引擎已同步补上（minRPts 参数）。这类信号应该在任何统计开始前就被剔除。</p>
+    <div class="tally">本卷出现：<b>1 笔</b>（#3，未成交无实际损失）· 引擎 v1 已复刻该拒单门</div>
+  </div>
+</div>
+
+<h2><span class="no">03</span>比胜负更重要的发现：逆向选择</h2>
+
+<div class="thesis">
+  <h3>成交的都是输家，错过的都是赢家</h3>
+  <p class="lead">把 7 笔成交和 2 笔有效错过（剔除 1 笔垃圾信号）分开放——这个对比就是本卷最值钱的一张表。</p>
+  <div class="duo">
+    <div class="panel lose">
+      <h4>回踩成交 · 7 笔</h4>
+      <ul>
+        <li><b>7 / 7 全部止损</b>，每笔恰好 −1R，合计 −$6,360</li>
+        <li>价格回到结构位 → 成交 → 立刻反向。挂单成交的那一刻，往往就是这段行情动量的反方向</li>
+        <li>#1 最极端：跳空穿过挂单价 89.5 点「优质」成交——方向完全错</li>
+      </ul>
+    </div>
+    <div class="panel win">
+      <h4>不回踩错过 · 2 笔</h4>
+      <ul>
+        <li><b>2 / 2 方向完全正确</b>，潜在合计约 +6R</li>
+        <li>#7 多 29,703：撤单后价格涨约 100 点（2R+）</li>
+        <li>#10 空 29,428：撤单后价格跌约 140 点（4R+）</li>
+      </ul>
+    </div>
+  </div>
+  <div class="quote">
+    这不是运气差，是<b>挂在结构位的静止限价单的结构性缺陷</b>：趋势延续时不回踩（错过赢家），回踩时往往是反转开始（接住输家）。
+    它在你的 trade-system 路线图里早有名字——「marketable limit + 追价容忍」是既定的下一站，本卷 11 笔样本是这个改动的第一个实证。
+  </div>
+</div>
+
+<h2><span class="no">04</span>诚实的边界</h2>
+<div class="caveats">
+  <h3>这份统计能说什么、不能说什么</h3>
+  <ul>
+    <li><b>样本量 n=7（成交）</b>，远低于 100 笔目标。0/7 的真实胜率 95% 置信上界仍有约 35%——「胜率为零」和「胜率三成」在这个样本量下无法区分</li>
+    <li>窗口三天里有一天是单边瀑布日，方向上对多头信号极端不利；类型 A/B 的归因签名需要 50+ 样本才能和噪声区分（你的宪法：先对照组，再过滤器）</li>
+    <li>撮合粒度为 5m bar：同一根 bar 内先触 TP 还是 SL 不可分辨（引擎保守记 SL 并打 ambiguous 标记；本卷 7 笔止损经独立逐 bar 重放核实，均无歧义）</li>
+    <li>毛收益口径：无手续费、无滑点、无资金费用，与线上 stats.py 的「毛期望」一致，不可直接换算为净期望</li>
+    <li>第 1 笔的结构状态在账本读取窗口之外未记录，归因时不计入类型 B 的证据</li>
+  </ul>
+</div>
+
+<h2><span class="no">05</span>下一卷</h2>
+<ol class="next">
+  <li><b>深历史扩样</b>——requestMoreData 分页拉数月 5m，目标 100+ 笔，让类型 A/B 的签名脱离噪声区</li>
+  <li><b>1m 撮合粒度</b>——逐信号局部窗口拉 1m，消除 5m bar 内顺序歧义，ambiguous 率归零</li>
+  <li><b>对照组实验</b>——规则 A（直达 TP 撤单）/ 规则 B（30 分钟移保本）开关已就绪，基线 vs 加规则同跑</li>
+  <li><b>入场方式实验</b>——静止限价 vs marketable limit（±追价容忍）的对照，直接检验逆向选择假设</li>
+  <li><b>过滤器候选固化</b>——h4/1d 压制门（类型 A）、h1 背离门（类型 B）写成可开关的过滤器，用对照组证明「拒绝这些信号」是否改善期望，而不是拍脑袋上线</li>
+</ol>
+
+<footer>
+  引擎 tradingview-mcp/src/backtest（commit 814c4f8）· 信号源 = 图表指标自输出（yolo-ms-backtest.pine 信号账本，与实盘 webhook 同一逻辑）<br>
+  撮合语义对齐 trade-system limit 时代：TTL 15 分钟自挂单受理起 · 规则 C 一次性位移（30% 上限）· TP/SL 锚定实际成交价 · outcome 记触发价<br>
+  本报告为历史数据回测，不构成投资建议。统计显著性警告见第 04 节。
+</footer>
+
+</div>
+</body>
+</html>

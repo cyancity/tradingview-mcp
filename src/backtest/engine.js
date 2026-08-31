@@ -64,6 +64,12 @@ export function runBacktest(dataset, opts = {}) {
                            // 30min without TP → SL to breakeven; 45min → force-close at bar close.
                            // Bar-grain note: hard exit uses the close of the first bar ending
                            // past the deadline (at most one bar later than the live instant).
+    timeWindow = null,     // { startH: 8, startM: 30, endH: 12, endM: 0, tz: 'America/New_York' }
+                           // Signal bar_time must fall within [start, end) in the given timezone.
+                           // Signals outside the window get outcome FILTERED_TIME.
+    htfFilter = false,     // When true: if 15m AND 1h states are both bearish (≤ -1), skip LONG;
+                           //            if 15m AND 1h states are both bullish (≥ 1), skip SHORT.
+                           // Outcome = FILTERED_HTF. FB/FS are kept (tagged for separate analysis).
   } = opts;
   const useC = rules.C !== false, useA = !!rules.A, useB = !!rules.B;
   const tfs = dataset.tf_seconds || 300;
@@ -75,10 +81,51 @@ export function runBacktest(dataset, opts = {}) {
   const trades = [];
   let occupiedUntil = -Infinity;
   const dataFrom = bars.length ? bars[0].time : Infinity;             // coverage gate
-
   for (const sig of signals) {
     const isLong = sig.dir === 'LONG';
     const signalClose = sig.bar_time + tfs;
+    // ---- F1: time window filter (e.g. NY 8:30–12:00) ----
+    if (timeWindow) {
+      const { startH = 0, startM = 0, endH = 24, endM = 0, tz = 'America/New_York' } = timeWindow;
+      const d = new Date(sig.bar_time * 1000);
+      const nyStr = d.toLocaleString('en-US', { timeZone: tz, hour12: false });
+      // nyStr format: "M/D/YYYY, HH:MM:SS"
+      const timeParts = nyStr.split(', ')[1].split(':');
+      const h = parseInt(timeParts[0], 10) % 24;  // toLocaleString may return 24 as 0
+      const m = parseInt(timeParts[1], 10);
+      const minuteOfDay = h * 60 + m;
+      const windowStart = startH * 60 + startM;
+      const windowEnd = endH * 60 + endM;
+      if (minuteOfDay < windowStart || minuteOfDay >= windowEnd) {
+        trades.push(base(sig, sig.sl, sig.tp, {
+          outcome: 'FILTERED_TIME', note: `outside ${startH}:${String(startM).padStart(2,'0')}–${endH}:${String(endM).padStart(2,'0')} ${tz}`,
+          ny_time: `${h}:${String(m).padStart(2,'0')}`,
+        }));
+        continue;
+      }
+    }
+    // ---- F2: HTF trend filter (15m + 1h suppress contra signals) ----
+    if (htfFilter && sig.states) {
+      const s15 = sig.states['15m'], s1h = sig.states['1h'];
+      if (s15 != null && s1h != null) {
+        const bothBear = s15 <= -1 && s1h <= -1;
+        const bothBull = s15 >= 1 && s1h >= 1;
+        // B signals (not FB) suppressed when HTF opposes
+        const isFakeout = sig.type === 'FB' || sig.type === 'FS';
+        if (!isFakeout && bothBear && isLong) {
+          trades.push(base(sig, sig.sl, sig.tp, {
+            outcome: 'FILTERED_HTF', note: `15m=${s15},1h=${s1h} suppress LONG`,
+          }));
+          continue;
+        }
+        if (!isFakeout && bothBull && !isLong) {
+          trades.push(base(sig, sig.sl, sig.tp, {
+            outcome: 'FILTERED_HTF', note: `15m=${s15},1h=${s1h} suppress SHORT`,
+          }));
+          continue;
+        }
+      }
+    }
     if (placedTooEarly(signalClose, dataFrom)) {                      // coverage
       trades.push(base(sig, sig.sl, sig.tp, { outcome: 'SKIPPED_NO_DATA', note: 'signal precedes bars window' }));
       continue;
