@@ -58,6 +58,41 @@ export async function extractSignals(entityId, { _deps } = {}) {
   return d;
 }
 
+/** Extract v3 ledger series (continuous, per-bar): ADD orders, trail SL, CHoCH-flat events.
+ *  Returns { add: [{time,type,entry,sl}], flat: [{time,px}], trail: [{time,sl}] } */
+export async function extractLedgerV3(entityId, { _deps } = {}) {
+  const ev = _deps?.evaluate || evaluate;
+  const raw = await ev(`(function(){
+    var widget=${CHART}; var chart=widget._chartWidget;
+    var srcs=chart.model().model().dataSources();
+    for(var i=0;i<srcs.length;i++){
+      var s=srcs[i]; var id=null; try{id=typeof s.id==='function'?s.id():s.id;}catch(e){}
+      if(id!==${JSON.stringify(entityId)}) continue;
+      var dwv=s.dataWindowView?s.dataWindowView():null; if(!dwv) return JSON.stringify({error:'no dataWindowView'});
+      var its=dwv.items();
+      var col={}; its.forEach(function(x){ col[x._title]=parseInt(x._id.slice(5))+1; });
+      if(col['bk_add_type']===undefined) return JSON.stringify({error:'not an MSB v3 study (no bk_add_type)', titles:Object.keys(col)});
+      var d=s._data; if(!d||typeof d.lastIndex!=='function') return JSON.stringify({error:'no _data'});
+      var last=d.lastIndex(), first=d.firstIndex();
+      var add=[], flat=[], trail=[];
+      for(var idx=first; idx<=last; idx++){
+        var row=d.valueAt(idx); if(!row) continue;
+        var num=function(t){var v=row[col[t]]; return (typeof v==='number'&&isFinite(v))?v:null;};
+        var at=num('bk_add_type');
+        if(at!==null && num('bk_add_time')!==null) add.push({time: num('bk_add_time'), type: at, entry: num('bk_add_entry'), sl: num('bk_add_sl')});
+        if(num('bk_flat_time')!==null) flat.push({time: num('bk_flat_time'), px: num('bk_flat_px')});
+        var ts=num('bk_trail_sl');
+        if(ts!==null) trail.push({time: row[0], sl: ts});
+      }
+      return JSON.stringify({add: add, flat: flat, trail: trail, barsTotal: last-first+1});
+    }
+    return JSON.stringify({error:'study not found'});
+  })()`);
+  const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (d.error) throw new Error('extractLedgerV3: ' + d.error + (d.titles ? ` (titles: ${d.titles.join(',')})` : ''));
+  return d;
+}
+
 /** Read main-series bars (chart timeframe) as [{time,open,high,low,close,volume}]
  *  Note: series bars valueAt() returns an ARRAY [time,o,h,l,c,v] (same as data.js getOhlcv). */
 export async function extractBars({ count = 5000 } = {}) {

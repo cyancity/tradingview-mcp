@@ -267,3 +267,159 @@ function base(sig, slRef, tpRef, extra) {
     states: sig.states, ...extra,
   };
 }
+
+/**
+ * runBacktestV3 — position-lifecycle matching for the v3 roll strategy.
+ * Dataset: { signals:[B/S/FB/FS with entry/sl/tp], add:[{time,type,entry,sl}],
+ *            flat:[{time,px}], trail:[{time,sl}], bars1m:[...], tf_seconds }
+ *
+ * Lifecycle:
+ *  entry signal fills at level (limit, TTL) → open position (size 1)
+ *  ADD order fills at same level → size += 1 (no TTL gating beyond entry's window)
+ *  trail events move the protective stop (trail_sl); TP (if any) disabled after first ADD
+ *  flat event (reverse CHoCH) → close ALL at market
+ *  SL touch → close ALL at SL
+ *  TP touch (only before first ADD) → close ALL at TP
+ */
+export function runBacktestV3(dataset, opts = {}) {
+  const {
+    tick = 0.25, pointValue = 2, qty = 1, ttl_s = 900, latency_s = 2,
+    minRPts = 0, ambiguousSlFirst = true,
+    useInitialTP = true,   // 第一 BOS 用 1:1 TP；ADD 后停用（滚仓）
+    initialTPRatio = 1,    // 初始 TP 盈亏比（默认 1:1）
+  } = opts;
+  const tfs = dataset.tf_seconds || 300;
+  const bars = dataset.bars1m;
+  const signals = [...(dataset.signals || [])].sort((a, b) => a.bar_time - b.bar_time);
+  const adds = [...(dataset.add || [])].sort((a, b) => a.time - b.time);
+  const flats = [...(dataset.flat || [])].sort((a, b) => a.time - b.time);
+  const trails = [...(dataset.trail || [])].sort((a, b) => a.time - b.time);
+  const dataFrom = bars.length ? bars[0].time : Infinity;
+
+  const trades = [];
+  let pos = null;            // { dir, size, fill_px, fill_time, sl, tp, rolled, note }
+  let addIdx = 0, flatIdx = 0, trailIdx = 0;
+  let occupiedUntil = -Infinity;
+
+  const snap = (px) => snapTick(px, tick);
+
+  const closePos = (outcome, trigger, exitTime, note) => {
+    const merged = pos.note ? (note ? pos.note + ',' + note : pos.note) : note;
+    const t = {
+      bar_time: pos.entry_time, dir: pos.dir, type: pos.type,
+      entry_ref: pos.entry_px, sl_ref: pos.sl, tp_ref: pos.tp,
+      outcome, fill_px: pos.fill_px, fill_time: pos.fill_time,
+      trigger, exit_time: exitTime, size: pos.size, note: merged,
+      states: pos.states,
+    };
+    if (pos.fill_px != null && trigger != null) {
+      const pts = pos.dir === 'LONG' ? trigger - pos.fill_px : pos.fill_px - trigger;
+      t.r_multiple = +(pts / pos.rPts).toFixed(3);
+      t.dollar = +(pts * pointValue * pos.size * qty).toFixed(2);
+      t.hold_min = +(((exitTime + 60) - (pos.fill_time)) / 60).toFixed(1);
+    }
+    trades.push(t);
+    occupiedUntil = exitTime + 60;
+    pos = null;
+  };
+
+  const openEntry = (sig) => {
+    const isLong = sig.dir === 'LONG';
+    const rPts = Math.abs(sig.entry_ref - sig.sl);
+    if (!rPts || (isLong ? sig.sl >= sig.entry_ref : sig.sl <= sig.entry_ref)) return null;
+    if (minRPts > 0 && rPts < minRPts) return null;
+    return {
+      dir: sig.dir, type: sig.type, size: 1,
+      entry_ref: sig.entry_ref, entry_px: snap(sig.entry_ref), entry_time: sig.bar_time,
+      fill_px: null, fill_time: null, sl: sig.sl, tp: sig.tp,
+      rPts, rolled: false, states: sig.states,
+    };
+  };
+
+  for (const sig of signals) {
+    // coverage gate
+    if (sig.bar_time + tfs + 2 < dataFrom) {
+      trades.push(base(sig, sig.sl, sig.tp, { outcome: 'SKIPPED_NO_DATA', note: 'signal precedes bars window' }));
+      continue;
+    }
+    if (pos) {
+      trades.push(base(sig, sig.sl, sig.tp, { outcome: 'CENSORED', note: 'occupied' }));
+      continue;
+    }
+    const p = openEntry(sig);
+    if (!p) {
+      trades.push(base(sig, sig.sl, sig.tp, { outcome: 'REJECTED', note: 'bad R or R_TOO_SMALL' }));
+      continue;
+    }
+    pos = p;
+    const placedAt = sig.bar_time + tfs + latency_s;
+    const deadline = placedAt + ttl_s;
+    let expired = false;
+
+    for (const b of bars) {
+      const bClose = b.time + 60;
+      if (bClose <= placedAt) continue;
+      if (!pos) break;
+
+      // ---- fill ----
+      if (!pos.fill_px) {
+        const touched = pos.dir === 'LONG' ? b.low <= pos.entry_px : b.high >= pos.entry_px;
+        if (touched) {
+          const openThrough = pos.dir === 'LONG' ? b.open <= pos.entry_px : b.open >= pos.entry_px;
+          pos.fill_px = snap(openThrough ? b.open : pos.entry_px);
+          pos.fill_time = b.time + 60;
+          pos.sl = snap(pos.sl);
+          pos.tp = useInitialTP ? snap(pos.dir === 'LONG' ? pos.fill_px + initialTPRatio * pos.rPts : pos.fill_px - initialTPRatio * pos.rPts) : null;
+        } else {
+          if (bClose >= deadline) { expired = true; break; }
+          continue;
+        }
+      }
+
+      // ---- apply trail SL moves (from ledger: FVG roll) ----
+      while (trailIdx < trails.length && trails[trailIdx].time <= b.time + 60) {
+        const tr = trails[trailIdx++];
+        const newSl = snap(tr.sl);
+        const better = pos.dir === 'LONG' ? newSl > pos.sl : newSl < pos.sl;
+        if (better) { pos.sl = newSl; pos.rolled = true; }
+      }
+
+      // ---- apply ADD fills (same bar as entry allowed) ----
+      while (addIdx < adds.length && adds[addIdx].time <= b.time + 60) {
+        const ad = adds[addIdx++];
+        if (!pos || pos.dir !== (ad.type > 0 ? 'LONG' : 'SHORT')) continue;
+        // ADD order at same level — fill if touched
+        const aPx = snap(ad.entry);
+        const touched = pos.dir === 'LONG' ? b.low <= aPx : b.high >= aPx;
+        if (touched) {
+          pos.size += 1;
+          pos.tp = null;               // 滚仓：ADD 后停用 TP
+          pos.rolled = true;
+          pos.note = (pos.note ? pos.note + ',' : '') + 'ADD@' + ad.time;
+        }
+      }
+
+      // ---- reverse CHoCH flat ----
+      while (flatIdx < flats.length && flats[flatIdx].time <= b.time + 60) {
+        const fl = flats[flatIdx++];
+        if (pos) closePos('FLAT_CHOCH', snap(fl.px || b.close), b.time + 60, 'reverse CHoCH flat');
+        break;
+      }
+      if (!pos) break;
+
+      // ---- TP/SL ----
+      const hitTP = pos.tp != null && (pos.dir === 'LONG' ? b.high >= pos.tp : b.low <= pos.tp);
+      const hitSL = pos.dir === 'LONG' ? b.low <= pos.sl : b.high >= pos.sl;
+      if (hitTP && hitSL && ambiguousSlFirst) { closePos('SL', pos.sl, b.time + 60, 'ambiguous,SL'); break; }
+      if (hitSL) { closePos('SL', pos.sl, b.time + 60, pos.rolled ? 'trail' : 'stop'); break; }
+      if (hitTP) { closePos('TP', pos.tp, b.time + 60, 'TP'); break; }
+    }
+
+    if (pos) {
+      if (expired) { trades.push(base(sig, sig.sl, sig.tp, { outcome: 'EXPIRED', note: 'TTL', states: sig.states })); pos = null; }
+      else { closePos('OPEN_AT_END', pos.fill_px, bars.length ? bars[bars.length - 1].time + 60 : null, 'open at end'); }
+    }
+  }
+  // leftover flats with no position: record as events (no trade)
+  return trades;
+}

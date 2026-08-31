@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { runBacktest, snapTick } from '../src/backtest/engine.js';
+import { runBacktest, runBacktestV3, snapTick } from '../src/backtest/engine.js';
 
 // 合成 1m bars：从 t0 起 n 根，价格由 fn(i) 给 {o,h,l,c}
 function bars(t0, n, fn) {
@@ -303,5 +303,55 @@ describe('engine: guard 实盘守护（30m BE / 45m 强平）', () => {
     assert.equal(t.outcome, 'TP');
     assert.equal(t.r_multiple, 2);
     assert.ok(!/BE@/.test(t.note || ''));
+  });
+});
+
+describe('engine v3: runBacktestV3 加仓滚仓', () => {
+  // 干净序列：fill@101 (bar1 low>SL99)，TP@103 (bar3)，SL 区在 bar5 之后
+  const mkBars = () => [
+    { time: T0, open: 100, high: 100.5, low: 99.5, close: 100, volume: 0 },          // signal bar
+    { time: T0 + 60, open: 100, high: 101.25, low: 99.75, close: 100.5, volume: 0 }, // touch 101 → fill
+    { time: T0 + 120, open: 100.5, high: 102, low: 100.25, close: 101.5, volume: 0 },
+    { time: T0 + 180, open: 101.5, high: 103.25, low: 101.25, close: 102, volume: 0 }, // TP 区
+    { time: T0 + 240, open: 102, high: 104, low: 101.5, close: 103, volume: 0 },
+    { time: T0 + 300, open: 103, high: 105, low: 97, close: 98, volume: 0 },           // SL 触及
+  ];
+  const baseOpts = { useInitialTP: true, initialTPRatio: 1, ttl_s: 300 };
+  const sig = { bar_time: T0, dir: 'LONG', type: 'B', entry_ref: 101, sl: 99, tp: 103 };
+
+  it('V1 第一 BOS 入场 + 初始 1:1 TP 出场', () => {
+    const ds = { tf_seconds: 60, signals: [sig], add: [], flat: [], trail: [], bars1m: mkBars() };
+    const [t] = runBacktestV3(ds, baseOpts);
+    assert.equal(t.outcome, 'TP');
+    assert.equal(t.r_multiple, 1); // 1:1
+    assert.equal(t.size, 1);
+  });
+
+  it('V2 ADD 后停用 TP → 滚仓 trail SL 上移 → SL 触及全平', () => {
+    const ds = {
+      tf_seconds: 60, signals: [sig],
+      add: [{ time: T0 + 180, type: 3, entry: 101, sl: 99 }],
+      flat: [],
+      trail: [{ time: T0 + 240, sl: 101.5 }],   // FVG 滚仓上移
+      bars1m: mkBars(),
+    };
+    const [t] = runBacktestV3(ds, baseOpts);
+    assert.equal(t.outcome, 'SL');
+    assert.equal(t.size, 2);                     // 主 + ADD
+    assert.ok(t.note && /ADD@/.test(t.note));
+    assert.equal(t.trigger, 101.5);              // trail SL
+    assert.equal(t.r_multiple, 0.75);            // fill@100, R=2, exit@101.5 → +1.5/2 = 0.75R
+  });
+
+  it('V3 反向 CHoCH flat → 市价全平', () => {
+    // TP=102 会在 bar3 (high 103.25) 触发；flat 放 bar2 (T0+120) 抢先
+    const ds = {
+      tf_seconds: 60, signals: [sig],
+      add: [], flat: [{ time: T0 + 120, px: 102.5 }], trail: [], bars1m: mkBars(),
+    };
+    const [t] = runBacktestV3(ds, baseOpts);
+    assert.equal(t.outcome, 'FLAT_CHOCH');
+    assert.equal(t.trigger, 102.5);
+    assert.equal(t.size, 1);
   });
 });
