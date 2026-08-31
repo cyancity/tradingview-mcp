@@ -70,6 +70,8 @@ export function runBacktest(dataset, opts = {}) {
     htfFilter = false,     // When true: if 15m AND 1h states are both bearish (≤ -1), skip LONG;
                            //            if 15m AND 1h states are both bullish (≥ 1), skip SHORT.
                            // Outcome = FILTERED_HTF. FB/FS are kept (tagged for separate analysis).
+    tpRatio = null,        // Override TP distance: tpPts = rPts * tpRatio (e.g. 1 for 1:1, 3 for 1:3).
+                           // null = use signal's original TP. Applies after exitMode B override.
   } = opts;
   const useC = rules.C !== false, useA = !!rules.A, useB = !!rules.B;
   const tfs = dataset.tf_seconds || 300;
@@ -146,7 +148,8 @@ export function runBacktest(dataset, opts = {}) {
       tpRef = isLong ? sig.entry_ref + (sig.entry_ref - swing) : sig.entry_ref - (swing - sig.entry_ref); // 1:1
     }
     const rPts = Math.abs(sig.entry_ref - slRef);
-    const tPts = Math.abs(tpRef - sig.entry_ref);
+    let tPts = tpRatio != null ? rPts * tpRatio : Math.abs(tpRef - sig.entry_ref);
+    if (tpRatio != null) tpRef = isLong ? sig.entry_ref + tPts : sig.entry_ref - tPts;
     if (!rPts || !tPts || (isLong ? slRef >= sig.entry_ref : slRef <= sig.entry_ref)) {
       trades.push(base(sig, slRef, tpRef, { outcome: 'INVALID', note: 'bad R' }));
       continue;
