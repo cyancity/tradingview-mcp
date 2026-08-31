@@ -48,6 +48,8 @@
 - [x] 已完成: Goal3 Skill/测试/验收 — SKILL.md + 5个测试(229 passed) + lint/tools:report 全绿
 - [x] 已完成: 真机验收阻塞排障 — TV Wayland 分数缩放 resize 死锁，X11 方案修复并固化（见决策记录 2026-08-31）
 - [ ] 进行中: 用户按验收清单走 A-D 四场景（TV 已可用，`tv copilot analyze` 待真机演示）
+- [x] 已完成: VSOP 裁决规范 v0.1（`docs/vsop-spec.md`）+ YOLO-MS 端口 draft（`src/core/copilot/vsop.js`）+ 行为不变量测试（`tests/copilot_vsop.test.js`，真实 MNQ 1m fixture）— 2026-08-31 实盘案卷驱动
+- [ ] 待办: 个人交易规则整理进 trading skill（任务 #1）；端口与真 MS 历史标签对齐验收（§6）；TCV3 止损计算 bug（用户自改）
 
 ---
 
@@ -362,6 +364,7 @@ export const tools = [{
 
 ## 决策记录
 
+- 2026-08-31: **VSOP 实盘案卷 → 裁决规范 v0.1**。用户三刀裸多（532/434/416，−$294）+ 关指标 confession + 肉眼 A+「1m BOS@29367.75」被 HTF 压制事后验证。拍板：①进场尺=方案 B（YOLO-MS 状态机口径，肉眼结构非触发器）②单笔风险预算 $200（张数=预算÷止损额，禁胆量放大）③彩票单每日≤1笔≤1张④HTF 压制过滤为硬规则⑤**架构裁决：实盘真值源=CDP 读活图 MS 标签/面板，禁止用 JS 重实现给实盘结论**（端口 vsop.js 与真 MS 的 S 信号差 20+ 分钟，仅离线 draft，对齐验收前不入 gate）。细则 `docs/vsop-spec.md`，回归守卫 `tests/copilot_vsop.test.js`。
 - 2026-08-31: **TV「一开 CDP 就卡死」排查结案** —— 与 copilot 代码/CDP 连接无关。根因：Electron 原生 Wayland + AMD(amdgpu) + Hyprland 分数缩放(1.875) 下，任何窗口 resize（退全屏/平铺抢空间）导致 GPU 线程死锁挂起（无 core dump，非 crash）。修复：`--ozone-platform=x11 --force-device-scale-factor=1.875`。已固化三处：① `~/.local/share/applications/tradingview.desktop`（图标启动自带修复参数+9223）② `src/core/health.js` launch（Linux 分支自动带参，`TV_LAUNCH_ARGS=''` 可禁用，`TV_DEVICE_SCALE_FACTOR` 可改缩放）③ 本文档。验收方式：用户确认 X11 方案 resize 瞬时卡顿但不再死锁。
 - 2026-08-29: 创建分支 `feature/trading-copilot`，完成现状盘点与初版计划草案
 - 2026-08-29 拍板 7 项：
