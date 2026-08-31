@@ -246,3 +246,62 @@ describe('engine: L7b gateway R_TOO_SMALL 门', () => {
     assert.equal(t.note, 'R_TOO_SMALL');
   });
 });
+
+describe('engine: guard 实盘守护（30m BE / 45m 强平）', () => {
+  const fillBar = { time: T0 + 420, open: 101, high: 101.5, low: 99.5, close: 100.5, volume: 100 };
+  const flat = (t0, n, o, h, l, c) => bars(t0, n, () => ({ o, h, l, c }));
+
+  it('T13 30min 未到 TP → SL 移 BE，回踩 BE 离场（r≈0）', () => {
+    // fill@100 at T0+480; 30min 后 BE=100；随后一根 low≤100
+    const ds = {
+      tf_seconds: 300,
+      bars1m: [
+        ...bars(T0 + 300, 2, () => ({ o: 105, h: 105.5, l: 104.5, c: 105 })),
+        fillBar,
+        ...flat(T0 + 480, 29, 100.8, 101.4, 100.6, 101),   // 29min 窄幅（不触 TP104/SL98）
+        { time: T0 + 480 + 29 * 60, open: 100.9, high: 101.2, low: 99.8, close: 100.2, volume: 100 }, // 第30min arm BE，同根 low≤100
+      ],
+      signals: [sigLong()],
+    };
+    const [t] = runBacktest(ds, { guard: { be_after_s: 1800, hard_exit_s: 2700 } });
+    assert.equal(t.outcome, 'SL');
+    assert.equal(t.trigger, 100);       // 纯 BE（be_ticks=0）
+    assert.equal(t.r_multiple, 0);
+    assert.match(t.note, /BE@30m/);
+  });
+
+  it('T14 45min 无 TP/SL → 强平 TIME_EXIT @close', () => {
+    const ds = {
+      tf_seconds: 300,
+      bars1m: [
+        ...bars(T0 + 300, 2, () => ({ o: 105, h: 105.5, l: 104.5, c: 105 })),
+        fillBar,
+        ...flat(T0 + 480, 44, 100.8, 101.4, 100.6, 101),   // 44min 窄幅（BE 在 30min 已 arm，但未回踩）
+        { time: T0 + 480 + 44 * 60, open: 101, high: 101.4, low: 100.7, close: 101.2, volume: 100 }, // 第45min 强平
+      ],
+      signals: [sigLong()],
+    };
+    const [t] = runBacktest(ds, { guard: { be_after_s: 1800, hard_exit_s: 2700 } });
+    assert.equal(t.outcome, 'TIME_EXIT');
+    assert.equal(t.trigger, 101.2);     // 该 bar close
+    assert.match(t.note, /BE@30m/);
+    assert.match(t.note, /hard@45m/);
+    assert.equal(t.r_multiple, 0.6);    // (101.2-100)/2
+  });
+
+  it('T15 守护不影响 30min 内的正常 TP/SL', () => {
+    const ds = {
+      tf_seconds: 300,
+      bars1m: [
+        ...bars(T0 + 300, 2, () => ({ o: 105, h: 105.5, l: 104.5, c: 105 })),
+        fillBar,
+        ...bars(T0 + 480, 3, () => ({ o: 102, h: 104.5, l: 101.5, c: 104 })), // 3min 内 TP
+      ],
+      signals: [sigLong()],
+    };
+    const [t] = runBacktest(ds, { guard: { be_after_s: 1800, hard_exit_s: 2700 } });
+    assert.equal(t.outcome, 'TP');
+    assert.equal(t.r_multiple, 2);
+    assert.ok(!/BE@/.test(t.note || ''));
+  });
+});

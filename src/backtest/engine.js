@@ -59,6 +59,11 @@ export function runBacktest(dataset, opts = {}) {
     exitMode = 'A',        // 'A' = live (signal sl/tp as-is: K±prevK extremes ∓1pt, 1:2)
                            // 'B' = control: same entry, SL = swing low/high of current range, TP 1:1
     swingLookback = 50, swingPivot = 2,   // exitMode B swing search params (MS fractal convention p=2)
+    guard = null,          // LIVE position guard (user's real rule, stackable on A/B):
+                           // { be_after_s: 1800, hard_exit_s: 2700, be_ticks: 0 }
+                           // 30min without TP → SL to breakeven; 45min → force-close at bar close.
+                           // Bar-grain note: hard exit uses the close of the first bar ending
+                           // past the deadline (at most one bar later than the live instant).
   } = opts;
   const useC = rules.C !== false, useA = !!rules.A, useB = !!rules.B;
   const tfs = dataset.tf_seconds || 300;
@@ -107,7 +112,7 @@ export function runBacktest(dataset, opts = {}) {
     let px = snapTick(sig.entry_ref, tick);
     const placedAt = signalClose + latency_s;                           // L2
     const deadline = placedAt + ttl_s;
-    let filled = null, armed = false, shifted = false, shiftEvalDone = false;
+    let filled = null, armed = false, beArmed = false, shifted = false, shiftEvalDone = false;
     let outcome = null, trigger = null, exitTime = null, note = null;
 
     for (const b of bars) {
@@ -147,6 +152,14 @@ export function runBacktest(dataset, opts = {}) {
         tpPx = snapTick(isLong ? filled.px + rPts : filled.px - rPts, tick);
         note = note ? note + ',B_armed' : 'B_armed';
       }
+      // ---- guard: BE arm (BEFORE hit checks — it moves slPx) ----
+      const heldS = bClose - (filled.time + 60);
+      if (guard && guard.be_after_s != null && !beArmed && heldS >= guard.be_after_s) {
+        beArmed = true;
+        const beTicks = guard.be_ticks ?? 0;
+        slPx = snapTick(isLong ? filled.px + beTicks * tick : filled.px - beTicks * tick, tick);
+        note = note ? note + `,BE@${Math.round(guard.be_after_s / 60)}m` : `BE@${Math.round(guard.be_after_s / 60)}m`;
+      }
       const hitTP = isLong ? b.high >= tpPx : b.low <= tpPx;
       const hitSL = isLong ? b.low <= slPx : b.high >= slPx;            // L5
       if (hitTP && hitSL && ambiguousSlFirst) {
@@ -155,6 +168,12 @@ export function runBacktest(dataset, opts = {}) {
       }
       if (hitSL) { outcome = 'SL'; trigger = slPx; exitTime = b.time; break; }
       if (hitTP) { outcome = 'TP'; trigger = tpPx; exitTime = b.time; break; }
+      // ---- guard: hard time exit (TP/SL on this bar take precedence) ----
+      if (guard && guard.hard_exit_s != null && heldS >= guard.hard_exit_s) {
+        outcome = 'TIME_EXIT'; trigger = b.close; exitTime = b.time;
+        note = note ? note + `,hard@${Math.round(guard.hard_exit_s / 60)}m` : `hard@${Math.round(guard.hard_exit_s / 60)}m`;
+        break;
+      }
     }
     if (!outcome) outcome = filled ? 'OPEN_AT_END' : 'EXPIRED';
 
@@ -164,7 +183,7 @@ export function runBacktest(dataset, opts = {}) {
       trigger, exit_time: exitTime !== null ? exitTime + 60 : null,
       shifted, note,
     });
-    if (filled && (outcome === 'TP' || outcome === 'SL')) {
+    if (filled && (outcome === 'TP' || outcome === 'SL' || outcome === 'TIME_EXIT')) {
       const pts = isLong ? trigger - filled.px : filled.px - trigger;
       t.r_multiple = +(pts / rPts).toFixed(3);
       t.dollar = +(pts * pointValue * qty).toFixed(2);
