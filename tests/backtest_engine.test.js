@@ -233,3 +233,16 @@ describe('engine: SHORT 镜像', () => {
     assert.equal(t.r_multiple, 2);
   });
 });
+
+describe('engine: L7b gateway R_TOO_SMALL 门', () => {
+  it('T11 R=1pt 的信号在 minRPts 门下被拒', () => {
+    const ds = {
+      tf_seconds: 300,
+      bars1m: bars(T0 + 300, 16, () => ({ o: 105, h: 105.5, l: 104.5, c: 105 })),
+      signals: [sigLong({ entry_ref: 100, sl: 99, tp: 102 })], // R=1
+    };
+    const [t] = runBacktest(ds, { minRPts: 5 });
+    assert.equal(t.outcome, 'REJECTED');
+    assert.equal(t.note, 'R_TOO_SMALL');
+  });
+});

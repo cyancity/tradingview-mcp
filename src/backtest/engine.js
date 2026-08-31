@@ -24,6 +24,7 @@ export function runBacktest(dataset, opts = {}) {
     rules = {}, ttl_s = 900, latency_s = 2, shiftCapFrac = 0.30,
     ruleB_s = 1800, ruleB_be_ticks = 2,
     qty = 1, tick = 0.25, pointValue = 20, ambiguousSlFirst = true,
+    minRPts = 0,           // L7b: gateway R_TOO_SMALL gate — signals with R below this are rejected
   } = opts;
   const useC = rules.C !== false, useA = !!rules.A, useB = !!rules.B;
   const tfs = dataset.tf_seconds || 300;
@@ -46,6 +47,10 @@ export function runBacktest(dataset, opts = {}) {
     const tPts = Math.abs(sig.tp - sig.entry_ref);
     if (!rPts || !tPts || (isLong ? sig.sl >= sig.entry_ref : sig.sl <= sig.entry_ref)) {
       trades.push(base(sig, { outcome: 'INVALID', note: 'bad R' }));
+      continue;
+    }
+    if (minRPts > 0 && rPts < minRPts) {           // L7b: gateway R_TOO_SMALL gate
+      trades.push(base(sig, { outcome: 'REJECTED', note: 'R_TOO_SMALL' }));
       continue;
     }
 
