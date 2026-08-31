@@ -344,14 +344,25 @@ describe('engine v3: runBacktestV3 加仓滚仓', () => {
   });
 
   it('V3 反向 CHoCH flat → 市价全平', () => {
-    // TP=102 会在 bar3 (high 103.25) 触发；flat 放 bar2 (T0+120) 抢先
+    // flat 只对已加仓（rolled）仓位生效：先 ADD 使 rolled，再 flat 抢先
+    const ds = {
+      tf_seconds: 60, signals: [sig],
+      add: [{ time: T0 + 120, type: 3, entry: 101, sl: 99 }],
+      flat: [{ time: T0 + 120, px: 102.5 }], trail: [], bars1m: mkBars(),
+    };
+    const [t] = runBacktestV3(ds, baseOpts);
+    assert.equal(t.outcome, 'FLAT_CHOCH');
+    assert.equal(t.trigger, 102.5);
+    assert.equal(t.size, 2);
+  });
+
+  it('V3b 未加仓时 flat 不生效 → 正常 TP 出场', () => {
     const ds = {
       tf_seconds: 60, signals: [sig],
       add: [], flat: [{ time: T0 + 120, px: 102.5 }], trail: [], bars1m: mkBars(),
     };
     const [t] = runBacktestV3(ds, baseOpts);
-    assert.equal(t.outcome, 'FLAT_CHOCH');
-    assert.equal(t.trigger, 102.5);
+    assert.equal(t.outcome, 'TP');
     assert.equal(t.size, 1);
   });
 });

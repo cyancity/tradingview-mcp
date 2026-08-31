@@ -287,6 +287,7 @@ export function runBacktestV3(dataset, opts = {}) {
     minRPts = 0, ambiguousSlFirst = true,
     useInitialTP = true,   // 第一 BOS 用 1:1 TP；ADD 后停用（滚仓）
     initialTPRatio = 1,    // 初始 TP 盈亏比（默认 1:1）
+    rollMode = true,       // 是否应用 ADD 加仓 + flat 全平（false = 纯固定 TP 出场）
   } = opts;
   const tfs = dataset.tf_seconds || 300;
   const bars = dataset.bars1m;
@@ -385,7 +386,7 @@ export function runBacktestV3(dataset, opts = {}) {
       }
 
       // ---- apply ADD fills (same bar as entry allowed) ----
-      while (addIdx < adds.length && adds[addIdx].time <= b.time + 60) {
+      while (rollMode && addIdx < adds.length && adds[addIdx].time <= b.time + 60) {
         const ad = adds[addIdx++];
         if (!pos || pos.dir !== (ad.type > 0 ? 'LONG' : 'SHORT')) continue;
         // ADD order at same level — fill if touched
@@ -399,11 +400,14 @@ export function runBacktestV3(dataset, opts = {}) {
         }
       }
 
-      // ---- reverse CHoCH flat ----
-      while (flatIdx < flats.length && flats[flatIdx].time <= b.time + 60) {
+      // ---- reverse CHoCH flat (只对已加仓/滚仓中的仓位生效；未加仓的用 TP/SL 出场) ----
+      while (rollMode && flatIdx < flats.length && flats[flatIdx].time <= b.time + 60) {
         const fl = flats[flatIdx++];
-        if (pos) closePos('FLAT_CHOCH', snap(fl.px || b.close), b.time + 60, 'reverse CHoCH flat');
-        break;
+        if (pos && pos.rolled) {
+          closePos('FLAT_CHOCH', snap(fl.px || b.close), b.time + 60, 'reverse CHoCH flat');
+          break;
+        }
+        // pos 未加仓：跳过该 flat，继续看下一个（flat 绑定到滚仓仓位，与固定 TP 仓位无关）
       }
       if (!pos) break;
 
