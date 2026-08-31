@@ -72,6 +72,9 @@ export function runBacktest(dataset, opts = {}) {
                            // Outcome = FILTERED_HTF. FB/FS are kept (tagged for separate analysis).
     tpRatio = null,        // Override TP distance: tpPts = rPts * tpRatio (e.g. 1 for 1:1, 3 for 1:3).
                            // null = use signal's original TP. Applies after exitMode B override.
+    sessionClose = null, // { h, m, tz } — force-close any open position at NY hh:mm.
+                         // Bar-close time (NY) >= session end → exit at bar close (after TP/SL checks).
+                         // Simulates the trader leaving the desk at a fixed wall-clock time.
   } = opts;
   const useC = rules.C !== false, useA = !!rules.A, useB = !!rules.B;
   const tfs = dataset.tf_seconds || 300;
@@ -224,6 +227,18 @@ export function runBacktest(dataset, opts = {}) {
         note = note ? note + `,hard@${Math.round(guard.hard_exit_s / 60)}m` : `hard@${Math.round(guard.hard_exit_s / 60)}m`;
         break;
       }
+      // ---- session close: NY wall-clock hard exit (after TP/SL precedence) ----
+      if (sessionClose && filled) {
+        const nyStr = new Date(bClose * 1000).toLocaleString('en-US',
+          { timeZone: sessionClose.tz || 'America/New_York', hour12: false });
+        const tp2 = nyStr.split(', ')[1].split(':');
+        const hh = parseInt(tp2[0], 10) % 24, mm = parseInt(tp2[1], 10);
+        if (hh * 60 + mm >= (sessionClose.h * 60 + (sessionClose.m || 0))) {
+          outcome = 'SESSION_EXIT'; trigger = b.close; exitTime = b.time;
+          note = note ? note + `,sess@${sessionClose.h}:${String(sessionClose.m || 0).padStart(2,'0')}` : `sess@${sessionClose.h}:${String(sessionClose.m || 0).padStart(2,'0')}`;
+          break;
+        }
+      }
     }
     if (!outcome) outcome = filled ? 'OPEN_AT_END' : 'EXPIRED';
 
@@ -233,7 +248,7 @@ export function runBacktest(dataset, opts = {}) {
       trigger, exit_time: exitTime !== null ? exitTime + 60 : null,
       shifted, note,
     });
-    if (filled && (outcome === 'TP' || outcome === 'SL' || outcome === 'TIME_EXIT')) {
+    if (filled && (outcome === 'TP' || outcome === 'SL' || outcome === 'TIME_EXIT' || outcome === 'SESSION_EXIT')) {
       const pts = isLong ? trigger - filled.px : filled.px - trigger;
       t.r_multiple = +(pts / rPts).toFixed(3);
       t.dollar = +(pts * pointValue * qty).toFixed(2);
