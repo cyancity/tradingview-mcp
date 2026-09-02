@@ -390,7 +390,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9223)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (44 tools by default; 88 with `TV_MCP_LEGACY=1`; profile-filterable via `TV_MCP_PROFILE`) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (47 tools by default; 102 with `TV_MCP_LEGACY=1`; profile-filterable via `TV_MCP_PROFILE`) + CLI (`tv` command, 30 commands with 67 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9223
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

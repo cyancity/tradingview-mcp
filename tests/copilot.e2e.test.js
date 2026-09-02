@@ -83,6 +83,7 @@ describe('copilot e2e — 无 TV 集成', () => {
     const server = { tools: [], tool(name, desc, schema, handler) { this.tools.push(name); } };
     const { registered } = registerTools(server, {});
     assert.ok(registered >= 46);
+    assert.ok(server.tools.includes('copilot_fast'));
     assert.ok(server.tools.includes('copilot_analyze'));
   });
 
@@ -90,7 +91,7 @@ describe('copilot e2e — 无 TV 集成', () => {
     const path = 'skills/trading-copilot/SKILL.md';
     assert.ok(existsSync(path), 'SKILL.md 必须存在');
     const c = readFileSync(path, 'utf8');
-    for (const kw of ['Step 0', 'Step 1', 'copilot_analyze', '一致性校验', '免责']) {
+    for (const kw of ['Step 0', 'Step 1', 'copilot_fast', 'copilot_analyze', '一致性校验', '免责']) {
       assert.ok(c.includes(kw), `SKILL.md 缺少 ${kw}`);
     }
   });

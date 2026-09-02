@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-44 consolidated tools (v3) for reading and controlling a live TradingView Desktop chart via CDP (port 9223).
+47 consolidated tools (v3) for reading and controlling a live TradingView Desktop chart via CDP (port 9223).
 Older docs/prompts may reference pre-v3 names (chart_set_symbol, data_get_pine_lines, ...) — they map to the tools below, or run the server with `TV_MCP_LEGACY=1` to restore the old names.
 
 ## Decision Tree — Which Tool When
@@ -25,14 +25,19 @@ Always pass `study_filter` to target a specific indicator by name substring (e.g
 - `data_get_ohlcv` without summary → all bars (use `count` to limit, default 100)
 - `quote_get` → single latest price snapshot
 
-### "Analyze my chart" (full report workflow)
-1. `quote_get` → current price
-2. `data_get_study` (no args) → all indicator readings
-3. `data_get_pine_drawings` `kind=line` → key price levels from custom indicators
-4. `data_get_pine_drawings` `kind=label` → labeled levels with context (e.g., "Settlement", "ASN O/U")
-5. `data_get_pine_drawings` `kind=table` → session stats, analytics tables
-6. `data_get_ohlcv` with `summary: true` → price action summary
-7. `capture_screenshot` → visual confirmation
+### "Analyze my chart" (fast path by default)
+1. Prefer one `copilot_fast` call. It concurrently reads the active chart state, active layout, quote and recent OHLCV, then reads the filtered iFVG table and computes ICT locally.
+2. For CLI use `tv copilot fast --filter iFVG`; the JSON includes `timings_ms.slowest` so the next run can target the real bottleneck.
+3. Add `include_visuals: true` / `--visuals` only when lines, labels or boxes are needed; add `include_drawings: true` / `--drawings` only when the user asks about hand-drawn objects.
+4. Escalate to `copilot_analyze` only for semantic dates, single-bar descriptions, multi-timeframe questions, generic drawing analysis, or a requested screenshot/visual write-back.
+
+### "Analyze my chart" (deep report workflow)
+Use `copilot_analyze` for the escalation cases above. Its report covers:
+
+1. `chart_get_state` / time parsing → symbol, timeframe and range
+2. OHLCV + indicator + Pine facts, fetched in parallel where independent
+3. ICT or generic analysis → structure, FVG, OB, liquidity, premium/discount
+4. Optional drawing write-back and one final `capture_screenshot`
 
 ### "Change the chart"
 - `chart_set` → switch ticker / resolution / chart style in one call (`symbol`, `timeframe`, `chart_type`; e.g. "AAPL", "D", "HeikinAshi")
@@ -91,14 +96,16 @@ Always pass `study_filter` to target a specific indicator by name substring (e.g
 
 These tools can return large payloads. Follow these rules to avoid context bloat:
 
-1. **Always use `summary: true` on `data_get_ohlcv`** unless you specifically need individual bars
+1. **Use `copilot_fast` for current-chart questions**; it derives a summary locally from one OHLCV read and avoids a duplicate summary request
 2. **Always use `study_filter`** on `data_get_pine_drawings` when you know which indicator you want — don't scan all studies unnecessarily
 3. **Never use `verbose: true`** on pine drawing reads unless the user specifically asks for raw drawing data with IDs/colors
 4. **Avoid `pine_source action=get`** on complex scripts — it can return 200KB+. Only read if you need to edit the code.
 5. **Avoid `data_get_study` with `entity_id`** on protected/encrypted indicators — their inputs are encoded blobs. Call it with no args instead for current values.
-6. **Use `capture_screenshot`** for visual context instead of pulling large datasets — a screenshot is ~300KB but gives you the full visual picture
+6. **Use `capture_screenshot`** only when visual confirmation is part of the request; the fast path deliberately skips it
 7. **Call `chart_get_state` once** at the start to get entity IDs, then reference them — don't re-call repeatedly
-8. **Cap your OHLCV requests** — `count: 20` for quick analysis, `count: 100` for deeper work, `count: 500` only when specifically needed
+8. **Cap your OHLCV requests** — `copilot_fast` defaults to 100 bars and returns only the latest 8 unless `include_bars` is requested; direct reads use `count: 20` for quick analysis, `count: 100` for deeper work, and `count: 500` only when specifically needed
+9. **Do not focus panes in the fast path**. It reads the active pane once; multi-pane or multi-timeframe work is an explicit deep-analysis escalation and must re-check state after every focus/change.
+10. **Keep independent reads in one batch** (`Promise.allSettled`/parallel tool calls). Never invoke separate `node src/cli/index.js` processes for quote, state, OHLCV and Pine when `copilot_fast` can do it in one process/connection.
 
 ### Output Size Estimates (compact mode)
 | Tool | Typical Output |
@@ -111,6 +118,7 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_pine_drawings` `kind=box` | ~1-2 KB per study (deduplicated zones) |
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
+| `copilot_fast` | Compact summary + latest 8 bars + filtered Pine/ICT facts + real timings |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
 
 ## Tool Conventions
@@ -125,7 +133,7 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 
 ## Manifest Size (env vars)
 
-The server registers 44 tools by default. For context-sensitive clients:
+The server registers 47 tools by default. For context-sensitive clients:
 - `TV_MCP_PROFILE` presets: `quant`, `data`, `chart`, `pine`, `ui`, `minimal` (11 tools), `lazy` (`tv_call` dispatcher + catalog + 5 core)
 - `TV_MCP_TOOLS` explicit allowlist (exact names or `tab_*` globs)
 - `TV_MCP_LEGACY=1` registers the pre-v3 names (55 aliases) alongside the new tools

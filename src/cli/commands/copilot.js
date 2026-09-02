@@ -1,9 +1,31 @@
 import { register } from '../router.js';
 import { analyze } from '../../core/copilot/analyzer.js';
+import { analyzeFast } from '../../core/copilot/fast.js';
 
 register('copilot', {
   description: 'Trading Copilot — ICT 客观分析',
   subcommands: new Map([
+    ['fast', {
+      description: 'Fast current-chart snapshot + local ICT (read-only, parallel)',
+      options: {
+        filter: { type: 'string', short: 'f', description: 'Pine study name filter (default iFVG; empty = all)' },
+        bars: { type: 'string', short: 'n', description: 'Recent bars to read (default 100, max 500)' },
+        indicators: { type: 'boolean', description: 'Include current data-window indicator values (redacted)' },
+        visuals: { type: 'boolean', description: 'Also read Pine lines/labels/boxes' },
+        drawings: { type: 'boolean', description: 'Read user drawings and their points (slower)' },
+        'raw-bars': { type: 'boolean', description: 'Include all requested bars in output' },
+        'require-layout': { type: 'string', description: 'Require an exact active layout name; never switches layout' },
+      },
+      handler: (opts) => analyzeFast({
+        study_filter: opts.filter === undefined ? 'iFVG' : opts.filter,
+        max_bars: opts.bars ? Number(opts.bars) : 100,
+        include_indicators: Boolean(opts.indicators),
+        include_visuals: Boolean(opts.visuals),
+        include_drawings: Boolean(opts.drawings),
+        include_bars: Boolean(opts['raw-bars']),
+        require_layout: opts['require-layout'],
+      }),
+    }],
     ['analyze', {
       description: 'Analyze chart with ICT (default) — question + semantic time + drawings/indicators',
       options: {

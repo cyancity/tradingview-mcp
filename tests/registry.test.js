@@ -41,7 +41,7 @@ const ACTIVE_TOOLS = [
   // batch
   'batch_run',
   // copilot
-  'copilot_analyze',
+  'copilot_fast', 'copilot_analyze',
 ];
 
 test('catalog: unique names and valid legacy replacement pointers', () => {

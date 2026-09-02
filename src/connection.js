@@ -2,6 +2,10 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+// A fast facts snapshot starts several read-only CDP calls at once. Keep the
+// first connection attempt shared so those calls do not all scan /json/list,
+// probe visible tabs, and attach separate clients concurrently.
+let connecting = null;
 // Overridable via TV_CDP_HOST/TV_CDP_PORT (or CDP_HOST/CDP_PORT) env vars.
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
@@ -61,7 +65,16 @@ export async function getClient() {
       targetInfo = null;
     }
   }
-  return connect();
+  if (!connecting) {
+    const pending = connect();
+    connecting = pending;
+    pending.then(() => {
+      if (connecting === pending) connecting = null;
+    }, () => {
+      if (connecting === pending) connecting = null;
+    });
+  }
+  return connecting;
 }
 
 export async function connect(targetId = null) {
@@ -172,6 +185,9 @@ export async function evaluateAsync(expression) {
 }
 
 export async function disconnect() {
+  if (connecting) {
+    try { await connecting; } catch { /* allow a later call to reconnect */ }
+  }
   if (client) {
     try { await client.close(); } catch {}
     client = null;

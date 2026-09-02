@@ -49,7 +49,26 @@
 - [x] 已完成: 真机验收阻塞排障 — TV Wayland 分数缩放 resize 死锁，X11 方案修复并固化（见决策记录 2026-08-31）
 - [ ] 进行中: 用户按验收清单走 A-D 四场景（TV 已可用，`tv copilot analyze` 待真机演示）
 - [x] 已完成: VSOP 裁决规范 v0.1（`docs/vsop-spec.md`）+ YOLO-MS 端口 draft（`src/core/copilot/vsop.js`）+ 行为不变量测试（`tests/copilot_vsop.test.js`，真实 MNQ 1m fixture）— 2026-08-31 实盘案卷驱动
+- [x] 已完成: 快速盘面路径 — `copilot_fast` MCP/CLI、单次连接并发读取、iFVG 默认过滤、ICT 本地计算、输出脱敏与真实分项计时 — 2026-09-03
+- [x] 已完成: CDP 首次连接并发锁，避免同一批读取重复发现可见 tab 和 attach 多个 client — 2026-09-03
 - [ ] 待办: 个人交易规则整理进 trading skill（任务 #1）；端口与真 MS 历史标签对齐验收（§6）；TCV3 止损计算 bug（用户自改）
+
+### 本轮性能优化验收
+
+- [x] 默认当前 MNQ/iFVG 不再先跑完整 `copilot_analyze`，改走 `copilot_fast`
+- [x] anchor: state/layout/quote/OHLCV 并发；auxiliary: iFVG table 与可选指标/Pine/user drawings 并发
+- [x] 默认关闭截图、用户绘图 properties、全量 bars、保护性 indicator inputs
+- [x] 输出 `timings_ms.total`、`timings_ms.slowest`、`warnings`，便于定位下一次真实瓶颈
+- [x] skill 已写明升级条件：时间语义、多周期、手绘对象、视觉回写才进入深度路径
+- [x] 已真机验证：`tv copilot fast --filter iFVG` 成功；当前 active chart 为 `OKX:BTCUSDT.P`/10m、layout `BTC`（未擅自切回 MNQ），iFVG table 命中、无 warning；两次真实 timing 为 97ms/80ms，输出约 14.9KB
+
+**接手第一步：**
+
+    pnpm test -- --test-name-pattern="copilot fast"
+    pnpm lint
+    pnpm tv copilot fast --filter iFVG
+
+CLI 真机命令需要 TradingView Desktop CDP 9223 在线；不要为验证先 focus pane 或切换 layout。
 
 ---
 
