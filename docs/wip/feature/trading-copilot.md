@@ -64,9 +64,9 @@
 
 **接手第一步：**
 
-    pnpm test -- --test-name-pattern="copilot fast"
-    pnpm lint
-    pnpm tv copilot fast --filter iFVG
+    npm run test:unit
+    npm run lint
+    node src/cli/index.js copilot fast --filter iFVG
 
 CLI 真机命令需要 TradingView Desktop CDP 9223 在线；不要为验证先 focus pane 或切换 layout。
 
