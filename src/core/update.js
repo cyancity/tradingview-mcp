@@ -28,7 +28,7 @@ export async function update({ _deps } = {}) {
   if (!existsSync(join(repoRoot, '.git'))) {
     return {
       success: false,
-      error: `Not a git checkout (${repoRoot}). tv_update needs a git clone — re-install with: git clone https://github.com/tradesdontlie/tradingview-mcp`,
+      error: `Not a git checkout (${repoRoot}). tv_update needs a git clone — re-install with: git clone https://github.com/cyancity/tradingview-mcp`,
     };
   }
 
