@@ -14,6 +14,28 @@ export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) 
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
+// Hard deadlines on every CDP interaction. TradingView's debug port keeps
+// answering HTTP even when its renderers have crashed or been frozen by
+// macOS (App Nap when launched detached from a background process), so an
+// unbounded Runtime.evaluate can block forever and wedge the whole MCP
+// session. Nothing in this file may await a CDP promise bare.
+const EVAL_TIMEOUT = 15000;
+const CONNECT_TIMEOUT = 5000;
+const PROBE_TIMEOUT = 2500;
+const HTTP_TIMEOUT = 3000;
+
+export function withTimeout(promise, ms, label) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(
+      `${label} timed out after ${ms}ms — TradingView is not responding. ` +
+      `Its renderer may have crashed or been suspended by macOS; ` +
+      `restart TradingView Desktop (tv launch) and retry.`
+    )), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
   chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
@@ -58,9 +80,13 @@ export async function getClient() {
   if (client) {
     try {
       // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
+      await withTimeout(
+        client.Runtime.evaluate({ expression: '1', returnByValue: true }),
+        PROBE_TIMEOUT, 'Liveness check'
+      );
       return client;
     } catch {
+      try { await client.close(); } catch {}
       client = null;
       targetInfo = null;
     }
@@ -88,12 +114,16 @@ export async function connect(targetId = null) {
           : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
       targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      client = await withTimeout(
+        CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id }),
+        CONNECT_TIMEOUT, 'CDP attach'
+      );
 
       // Enable required domains
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
+      await withTimeout(
+        Promise.all([client.Runtime.enable(), client.Page.enable(), client.DOM.enable()]),
+        CONNECT_TIMEOUT, 'CDP domain enable'
+      );
 
       return client;
     } catch (err) {
@@ -121,7 +151,8 @@ export async function reconnectTo(targetId) {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`,
+    { signal: AbortSignal.timeout(HTTP_TIMEOUT) });
   const targets = await resp.json();
   const charts = targets.filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
   if (charts.length === 0) return null;
@@ -136,9 +167,15 @@ async function findChartTarget() {
   for (const t of charts) {
     let c = null;
     try {
-      c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id });
+      c = await withTimeout(
+        CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id }),
+        CONNECT_TIMEOUT, 'CDP attach'
+      );
       await c.Runtime.enable();
-      const r = await c.Runtime.evaluate({ expression: 'document.visibilityState', returnByValue: true });
+      const r = await withTimeout(
+        c.Runtime.evaluate({ expression: 'document.visibilityState', returnByValue: true }),
+        PROBE_TIMEOUT, 'Renderer probe'
+      );
       if (r?.result?.value === 'visible') return t;
     } catch { /* probe failed, skip */ }
     finally {
@@ -151,7 +188,8 @@ async function findChartTarget() {
 }
 
 async function findTargetById(id) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`,
+    { signal: AbortSignal.timeout(HTTP_TIMEOUT) });
   const targets = await resp.json();
   return targets.find(t => t.id === id) || null;
 }
@@ -165,12 +203,28 @@ export async function getTargetInfo() {
 
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const result = await c.Runtime.evaluate({
-    expression,
-    returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
-  });
+  const { timeoutMs, ...cdpOpts } = opts;
+  let result;
+  try {
+    result = await withTimeout(
+      c.Runtime.evaluate({
+        expression,
+        returnByValue: true,
+        awaitPromise: cdpOpts.awaitPromise ?? false,
+        ...cdpOpts,
+      }),
+      timeoutMs ?? EVAL_TIMEOUT, 'Runtime.evaluate'
+    );
+  } catch (err) {
+    // Drop the cached client on timeout so the next call re-probes targets
+    // instead of piling more calls onto a dead renderer.
+    if (/timed out/.test(err.message)) {
+      try { await c.close(); } catch {}
+      client = null;
+      targetInfo = null;
+    }
+    throw err;
+  }
   if (result.exceptionDetails) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text
