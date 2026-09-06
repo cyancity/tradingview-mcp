@@ -31,8 +31,26 @@ yolo-main 线性历史 = main(11 提交，fork 独有) + feature/trading-copilot
 - 白捡组合（open issue + 现成 open PR）：#497←#498（set_inputs 破坏 Pine 输入）、#404←#405（indicator_search 重复搜索）、#475←#463/#352（pine 脚本静默覆盖）、#13←#18/#80/#108（Electron 38）、#174←#411（CDP 全局超时）
 - 对本 fork 最高价值：#411 CDP 调用全局超时、Electron 38 启动兼容思路、#497 需排查 fork 的 pine 工具是否有同款 bug、#461 非价格窗格 study values 为空（ICT copilot 依赖指标读数）
 
+## 2026-09-06 执行记录（上游 PR 吸收，全部实测后合并）
+
+- codex/cold-start-resilience 已 cherry-pick 进 yolo-main（wait.js 裸符号匹配 + symbol_info tick 字段）
+- feature/paper-trading 已 push 到 origin 留底（不合并，未改完）
+- **wip/cdp-global-timeout（源 PR #411）已合并**：所有 CDP 交互加硬性截止（evaluate 15s/attach 5s/probe 2.5s/HTTP 3s），超时丢弃缓存 client；macOS tv_launch 改走 `open -a` 防 App Nap 挂死 renderer。保留 fork 的前台 tab 可见性探测（上游版会退化 63bb4e0）
+- **wip/pine-new-script-safety（源 PR #463）已合并**：pine_new 改为经 Pine 编辑器菜单真建新脚本（绑定状态前后证明，失败 fail-loud，杜绝 #475 静默覆盖）；smartCompile 默认永不点 Save，Save 按钮限定 .tv-script-widget 面板内，按钮匹配兼容 TV 3.x 图标按钮
+- 实测适配（TV 3.4.0 zh-CN）：菜单文案中英双语、子菜单悬停展开、弹层限定 contentDefaultAppearance、跳过通知气泡、未保存=未保存；pine_new 端到端验证通过
+- openScript 无需修：fork 已是 fetch→激活 tab→校验的 fail-loud 实现（实测 pine open 无法激活时正确拒绝）
+- 测试 236/236 通过；两个 WIP worktree/分支已清理
+
+## Electron 38 评估结论
+
+本机 TV 3.4.0 / Electron 41.7.1（user agent 实测）。Electron 38 是 2025 末的新 major，不是旧版本；本机比它还新两级。fork 的启动路径在 3.4.0 上日常可用（本次 tv launch 实测成功），上游 electron38-compat 分支针对的是 Windows MSIX 场景，不含 ELECTRON_RUN_AS_NODE 处理。剩余暴露面：从 VS Code/Cursor 等 Electron 宿主终端启动 MCP 时 ELECTRON_RUN_AS_NODE 会泄漏给 TV 子进程——目前代码未处理，如遇 TV 启动即崩可加 strip。
+
+## Price Alert REST API（讲解结论）
+
+fork 的 alert 工具已基于 pricealerts.tradingview.com REST API（上游 #301 已并入），alert list/create/delete 可用。上游 open PR #330 增量：alert_create_webhook（带 webhook 的一次性价格告警 + 从剪贴板读 message 避免密钥过 MCP）、alert_modify_price（重建式改价）、alert_delete_one（按 id 删单个并验证）——需要时可以移植。
+
 ## 下一步
 
-- 用户决定：cherry-pick codex 修复；paper-trading push 备份
-- 上游 issues/PR 统计（后台进行中），有价值的拉出来讨论
-- 注意：`tv_update` 自更新仍指向 origin/main（原 main，已冻结），yolo-main 主线化后该工具实际不再适用，可考虑改造或移除；GitHub 仓库默认分支仍是 main，如需把 yolo-main 设为默认分支另行操作
+- `tv_update`/status 的 update 检查仍指向 origin/main（已冻结），yolo-main 主线下提示失真，待改造
+- 上游白捡组合中尚未处理：#497←#498（set_inputs 破坏 Pine 输入，fork 需排查同款）、#404←#405、#461（非价格窗格 study values 空）
+- GitHub 默认分支仍是 main，如需切到 yolo-main另行操作
