@@ -934,17 +934,21 @@ const READ_BINDING = `
     var out = { title: null, saveState: null };
     var root = document.querySelector('${PINE_ROOT}');
     if (!root) return out;
-    var titleEl = root.querySelector('button[class*="nameButton"]');
+    var titleEl = root.querySelector('[class*="nameButton"]');
     if (titleEl) out.title = titleEl.textContent.trim();
     // A bound script shows a version stamp like "8 ∙ Today, 03:02"; an unsaved
-    // one shows "Unsaved version". Separator glyph varies (· / ∙ / •), so
-    // match "digits + any non-alphanumeric separator" rather than a literal.
+    // one shows "Unsaved version" (Chinese UI: 未保存的版本). Separator glyph
+    // varies (· / ∙ / •), so match "digits + any non-alphanumeric separator"
+    // rather than a literal.
     var els = root.querySelectorAll('button,div,span');
     for (var i = 0; i < els.length; i++) {
       var t = els[i].textContent;
       if (!t) continue;
       t = t.trim();
-      if (/^unsaved/i.test(t) || /^[0-9]+\\s*[^0-9A-Za-z\\s]/.test(t)) { out.saveState = t; break; }
+      // Skip toast/notification lines (e.g. '11:25:35 "无标题脚本"已打开') —
+      // they are digit-prefixed too but never the binding stamp.
+      if (/已打开|opened/i.test(t)) continue;
+      if (/^(unsaved|未保存)/i.test(t) || /^[0-9]+\\s*[^0-9A-Za-z\\s]/.test(t)) { out.saveState = t; break; }
     }
     return out;
   })()
@@ -968,63 +972,95 @@ export async function newScript({ type }) {
   // dropdown -> "Create new" -> type). setValue-into-the-open-buffer would
   // silently overwrite whichever saved script is bound to the active tab
   // (upstream issue #475), so there is no fallback to that path.
+  //
+  // TV builds these menus from build-hashed classes and localizes labels
+  // (verified live on TV 3.4.0 zh-CN: 创建新的 / 指标 / 策略 / 脚本库), so:
+  // match own-text bilingually, scope lookups to visible
+  // .contentDefaultAppearance popups (page-wide scans hit chart-legend
+  // noise), and open the flyout submenu by HOVER — it ignores clicks.
+  const MENU_POPUP = '[class*="contentDefaultAppearance"]';
+  const ownTextFn = `
+    function ownText(n) {
+      return Array.prototype.slice.call(n.childNodes)
+        .filter(function(c) { return c.nodeType === 3; })
+        .map(function(c) { return c.textContent.trim(); }).join(' ').trim();
+    }
+  `;
+
+  const menuAction = (pattern, action) => evaluate(`
+    (function() {
+      var re = new RegExp(${JSON.stringify(pattern)}, 'i');
+      var action = ${JSON.stringify(action)};
+      ${ownTextFn}
+      var pops = document.querySelectorAll('${MENU_POPUP}');
+      for (var i = 0; i < pops.length; i++) {
+        var p = pops[i];
+        if (p.offsetParent === null) continue;
+        var nodes = p.querySelectorAll('[class*="item-"], [class*="title-"]');
+        for (var j = 0; j < nodes.length; j++) {
+          var n = nodes[j];
+          if (n.offsetParent === null) continue;
+          var t = ownText(n);
+          if (!t || t.length > 40 || !re.test(t)) continue;
+          var row = n.closest('[class*="item-"]') || n;
+          var r = row.getBoundingClientRect();
+          if (action === 'hover') {
+            var opts = { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+            ['mouseover', 'mousemove', 'mouseenter'].forEach(function(type) {
+              row.dispatchEvent(new MouseEvent(type, opts));
+            });
+          } else {
+            row.click();
+          }
+          return t;
+        }
+      }
+      return null;
+    })()
+  `);
+
   const menuOpened = await evaluate(`
     (function() {
       var root = document.querySelector('${PINE_ROOT}');
       if (!root) return false;
-      var title = Array.prototype.slice.call(
-        root.querySelectorAll('[class*="nameButton"]')
-      ).filter(function(e) { return e.offsetParent !== null; });
-      if (title[0]) { title[0].click(); return 'title-dropdown'; }
-      var more = Array.prototype.slice.call(
-        root.querySelectorAll('button[aria-label="More"], button[data-name*="menu"], button[aria-label*="menu" i]')
-      ).filter(function(b) { return b.offsetParent !== null; });
-      if (more[0]) { more[0].click(); return 'more-button'; }
-      return false;
+      var title = root.querySelector('[data-qa-id="pine-script-title-button"]') ||
+        Array.prototype.slice.call(root.querySelectorAll('[class*="nameButton"]'))
+          .filter(function(e) { return e.offsetParent !== null; })[0];
+      if (!title) return false;
+      if (title.getAttribute('aria-expanded') !== 'true') title.click();
+      return true;
     })()
   `);
 
   if (!menuOpened) {
     throw new Error(
-      'Could not open the Pine Editor script menu (looked for the script-name dropdown, then "More") ' +
+      'Could not open the Pine Editor script menu (looked for the script-name dropdown) ' +
       `inside ${PINE_ROOT}. Refusing to fall back to overwriting the open script.`
     );
   }
 
   await new Promise(r => setTimeout(r, 400));
 
-  const MENU_SEL = '[role="menuitem"], [class*="item-"], [class*="label-"]';
-  const clickMenuItem = (pattern) => evaluate(`
-    (function() {
-      var re = new RegExp(${JSON.stringify(pattern)}, 'i');
-      var nodes = document.querySelectorAll('${MENU_SEL}');
-      for (var i = 0; i < nodes.length; i++) {
-        var n = nodes[i];
-        if (n.offsetParent === null) continue;
-        var t = (n.textContent || '').trim();
-        if (t.length > 40) continue;
-        if (re.test(t)) { n.click(); return t; }
-      }
-      return null;
-    })()
-  `);
-
-  const submenuOpened = await clickMenuItem('^create new$');
+  // Open the "Create new" flyout submenu (hover) and pick the type (click).
+  const submenuOpened = await menuAction('^(创建新的|create new)', 'hover');
   if (!submenuOpened) {
-    await evaluate(`(function(){ document.body.click(); return true; })()`);
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
     throw new Error('Could not find "Create new" in the Pine Editor script menu. Refusing to fall back to overwriting the open script.');
   }
 
-  await new Promise(r => setTimeout(r, 400));
+  await new Promise(r => setTimeout(r, 500));
 
-  // Submenu labels carry their shortcut inline ("Indicator⌘ K, ⌘ I"), so
-  // anchor at the start only. "Built-in…" sits in the same submenu and the
-  // length cap excludes it.
-  const wanted = { indicator: '^indicator', strategy: '^strategy', library: '^library' }[type] || '^indicator';
-  const itemClicked = await clickMenuItem(wanted);
+  // Anchor at the start only: the same submenu holds "内置…" (Built-in…) and
+  // zh labels are 指标/策略/脚本库. The length cap excludes long entries.
+  const wanted = {
+    indicator: '^(指标|indicator)',
+    strategy: '^(策略|strategy)',
+    library: '^(脚本库|函数库|library)',
+  }[type] || '^(指标|indicator)';
+  const itemClicked = await menuAction(wanted, 'click');
 
   if (!itemClicked) {
-    await evaluate(`(function(){ document.body.click(); return true; })()`);
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
     throw new Error(
       'Could not find a "' + type + '" item in the Pine Editor "Create new" submenu. ' +
       'Refusing to fall back to overwriting the open script.'
@@ -1037,8 +1073,10 @@ export async function newScript({ type }) {
 
   // A genuinely new script is unsaved and carries no version stamp. If the
   // buffer is still bound to the previously open script, fail loudly — a
-  // later save would otherwise overwrite the user's script.
-  const stillBound = after?.saveState && /^\d+/.test(after.saveState);
+  // later save would otherwise overwrite the user's script. A bound stamp
+  // looks like "8 ∙ Today, 03:02" (digits + ∙/·/• separator); toasts like
+  // '11:25:35 "…"已打开' start with a time and must not match.
+  const stillBound = after?.saveState && /^[0-9]+\s*[∙•·]/.test(after.saveState);
   if (stillBound) {
     throw new Error(
       'Pine Editor still reports a saved script ("' + after.saveState + '") after requesting a new script. ' +
