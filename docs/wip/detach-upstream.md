@@ -24,6 +24,13 @@ yolo-main 线性历史 = main(11 提交，fork 独有) + feature/trading-copilot
 - `codex/cold-start-resilience`（6006924，3 文件 +9/-3）：**未覆盖，修复的 bug 在 yolo-main 仍存在**。① src/wait.js:49 仍用子串匹配，"NASDAQ:QQQ" 匹配不上图例 "QQQ" 会超时、"QQ" 会误匹配 "QQQ"；② symbol_info 仍缺 minmov/pricescale tick 字段。建议 cherry-pick 进 yolo-main。
 - `feature/paper-trading`（09eb469，+1335 行）：**未覆盖，全网唯一副本**。CDP 驱动 paper trading UI（市价单/平仓/trade_status 已实盘验证，limit/stop 未端到端验证）。不可删，建议 push 备份或后续并入。
 
+## 上游 issues/PR 统计（2026-09-06，全量 506 条：118 issue + 388 PR）
+
+- 上游外部 PR 合并率仅 2.7%，7/28 后完全停更（连 CI 审批都停了，#474）
+- 最大痛点：Windows/MSIX 启动（20）、CDP 连接（15，几乎全 open）、Pine/Monaco（32 个修复 PR 0 合并）
+- 白捡组合（open issue + 现成 open PR）：#497←#498（set_inputs 破坏 Pine 输入）、#404←#405（indicator_search 重复搜索）、#475←#463/#352（pine 脚本静默覆盖）、#13←#18/#80/#108（Electron 38）、#174←#411（CDP 全局超时）
+- 对本 fork 最高价值：#411 CDP 调用全局超时、Electron 38 启动兼容思路、#497 需排查 fork 的 pine 工具是否有同款 bug、#461 非价格窗格 study values 为空（ICT copilot 依赖指标读数）
+
 ## 下一步
 
 - 用户决定：cherry-pick codex 修复；paper-trading push 备份
