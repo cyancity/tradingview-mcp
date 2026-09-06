@@ -49,6 +49,10 @@ yolo-main 线性历史 = main(11 提交，fork 独有) + feature/trading-copilot
 
 fork 的 alert 工具已基于 pricealerts.tradingview.com REST API（上游 #301 已并入），alert list/create/delete 可用。上游 open PR #330 增量：alert_create_webhook（带 webhook 的一次性价格告警 + 从剪贴板读 message 避免密钥过 MCP）、alert_modify_price（重建式改价）、alert_delete_one（按 id 删单个并验证）——需要时可以移植。
 
+## 最终分支布局（2026-09-06 清理后）
+
+仅 3 条分支，本地与 origin 全同步：`yolo-main`（唯一主线）、`main`（冻结基线，origin/main 同为 fb16c7f）、`feature/paper-trading`（未完成工作留底）。已删除：本地 codex/cold-start-resilience（内容经 cherry-pick 进入 yolo-main）、origin/feature/trading-copilot（已包含于 yolo-main）、origin/fix/tv-launch-electron38-compat（上游副本，原件在 upstream GitHub）。
+
 ## 下一步
 
 - `tv_update`/status 的 update 检查仍指向 origin/main（已冻结），yolo-main 主线下提示失真，待改造
