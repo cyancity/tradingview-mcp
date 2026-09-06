@@ -16,11 +16,16 @@ yolo-main 线性历史 = main(11 提交，fork 独有) + feature/trading-copilot
 
 ## 验证结果
 
-- `node --test tests/update.test.js`：9/9 通过（变基前）；变基后全量 unit 见本轮执行记录
+- yolo-main 全量单测 233/233 通过（含 copilot 新增 6 个测试文件）
 - `grep tradesdontlie` 全仓无残留
+
+## 独有分支覆盖评估（2026-09-06）
+
+- `codex/cold-start-resilience`（6006924，3 文件 +9/-3）：**未覆盖，修复的 bug 在 yolo-main 仍存在**。① src/wait.js:49 仍用子串匹配，"NASDAQ:QQQ" 匹配不上图例 "QQQ" 会超时、"QQ" 会误匹配 "QQQ"；② symbol_info 仍缺 minmov/pricescale tick 字段。建议 cherry-pick 进 yolo-main。
+- `feature/paper-trading`（09eb469，+1335 行）：**未覆盖，全网唯一副本**。CDP 驱动 paper trading UI（市价单/平仓/trade_status 已实盘验证，limit/stop 未端到端验证）。不可删，建议 push 备份或后续并入。
 
 ## 下一步
 
-- 评估两个本地独有分支的覆盖情况，决定去留
+- 用户决定：cherry-pick codex 修复；paper-trading push 备份
 - 上游 issues/PR 统计（后台进行中），有价值的拉出来讨论
-- 注意：`tv_update` 自更新仍指向 origin/main（原 main，已冻结），yolo-main 主线化后该工具实际不再适用，可考虑改造或移除
+- 注意：`tv_update` 自更新仍指向 origin/main（原 main，已冻结），yolo-main 主线化后该工具实际不再适用，可考虑改造或移除；GitHub 仓库默认分支仍是 main，如需把 yolo-main 设为默认分支另行操作
