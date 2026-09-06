@@ -810,7 +810,15 @@ export async function getConsole() {
   return { success: true, entries: entries || [], entry_count: entries?.length || 0 };
 }
 
-export async function smartCompile() {
+/**
+ * Compile / apply the current script to the chart.
+ *
+ * `allowSave` defaults to false and MUST stay that way: TradingView's Save
+ * button persists into the script slot the buffer is bound to, so an implicit
+ * Save here silently overwrites whichever saved script happens to be open.
+ * See upstream issue #475.
+ */
+export async function smartCompile({ allowSave = false } = {}) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw await editorUnavailableError('smartCompile');
 
@@ -826,23 +834,39 @@ export async function smartCompile() {
 
   const buttonClicked = await evaluate(`
     (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
+      var allowSave = ${allowSave ? 'true' : 'false'};
+      // TV 3.x renders these as icon-only buttons, so fold aria-label/title/
+      // data-name into the match or textContent alone finds nothing.
+      function label(b) {
+        return (
+          (b.textContent || '') + ' ' +
+          (b.getAttribute('aria-label') || '') + ' ' +
+          (b.getAttribute('title') || '') + ' ' +
+          (b.getAttribute('data-name') || '')
+        ).trim();
       }
+      var btns = document.querySelectorAll('button');
+      var addBtn = null, updateBtn = null, saveAndAddBtn = null, saveBtn = null;
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        if (b.offsetParent === null) continue;
+        var t = label(b);
+        var cls = (typeof b.className === 'string') ? b.className : '';
+        if (/save and add to chart/i.test(t)) { if (!saveAndAddBtn) saveAndAddBtn = b; continue; }
+        if (!addBtn && (/add to chart/i.test(t) || cls.indexOf('addToChart') !== -1 || cls.indexOf('applyToChart') !== -1)) addBtn = b;
+        if (!updateBtn && (/update on chart/i.test(t) || cls.indexOf('updateOnChart') !== -1)) updateBtn = b;
+        // Scope Save to the Pine Editor panel: the chart-layout save button
+        // also carries a "saveButton" class and must never be clicked here.
+        if (!saveBtn && cls.indexOf('saveButton') !== -1 && b.closest('${PINE_ROOT}')) saveBtn = b;
+      }
+      // Non-destructive actions first, always. Deliberately NOT falling back
+      // to Save (even "Save and add to chart") by default: Save persists into
+      // the script slot the buffer is bound to and would overwrite that saved
+      // script — see upstream issue #475.
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
       if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
+      if (allowSave && saveAndAddBtn) { saveAndAddBtn.click(); return 'Save and add to chart'; }
+      if (allowSave && saveBtn) { saveBtn.click(); return 'Pine Save'; }
       return null;
     })()
   `);
@@ -897,6 +921,39 @@ export async function smartCompile() {
   };
 }
 
+// Root of the Pine Editor panel. Used to scope DOM lookups so we never touch
+// the chart's own controls (notably the chart-layout Save button, which shares
+// the "saveButton" class prefix with Pine's).
+const PINE_ROOT = '.tv-script-widget';
+
+// Reads the Pine Editor's binding state: which saved script the buffer is
+// currently attached to. Used to prove a new script was really created rather
+// than the open script being silently overwritten (upstream issue #475).
+const READ_BINDING = `
+  (function() {
+    var out = { title: null, saveState: null };
+    var root = document.querySelector('${PINE_ROOT}');
+    if (!root) return out;
+    var titleEl = root.querySelector('[class*="nameButton"]');
+    if (titleEl) out.title = titleEl.textContent.trim();
+    // A bound script shows a version stamp like "8 ∙ Today, 03:02"; an unsaved
+    // one shows "Unsaved version" (Chinese UI: 未保存的版本). Separator glyph
+    // varies (· / ∙ / •), so match "digits + any non-alphanumeric separator"
+    // rather than a literal.
+    var els = root.querySelectorAll('button,div,span');
+    for (var i = 0; i < els.length; i++) {
+      var t = els[i].textContent;
+      if (!t) continue;
+      t = t.trim();
+      // Skip toast/notification lines (e.g. '11:25:35 "无标题脚本"已打开') —
+      // they are digit-prefixed too but never the binding stamp.
+      if (/已打开|opened/i.test(t)) continue;
+      if (/^(unsaved|未保存)/i.test(t) || /^[0-9]+\\s*[^0-9A-Za-z\\s]/.test(t)) { out.saveState = t; break; }
+    }
+    return out;
+  })()
+`;
+
 export async function newScript({ type }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw await editorUnavailableError('newScript');
@@ -907,10 +964,127 @@ export async function newScript({ type }) {
     strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
     library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
   };
-
   const template = templates[type] || templates.indicator;
 
-  // Set the template into the ACTIVE editor instance.
+  const before = await evaluate(READ_BINDING);
+
+  // Create a REAL new script through the Pine Editor menu (script-name
+  // dropdown -> "Create new" -> type). setValue-into-the-open-buffer would
+  // silently overwrite whichever saved script is bound to the active tab
+  // (upstream issue #475), so there is no fallback to that path.
+  //
+  // TV builds these menus from build-hashed classes and localizes labels
+  // (verified live on TV 3.4.0 zh-CN: 创建新的 / 指标 / 策略 / 脚本库), so:
+  // match own-text bilingually, scope lookups to visible
+  // .contentDefaultAppearance popups (page-wide scans hit chart-legend
+  // noise), and open the flyout submenu by HOVER — it ignores clicks.
+  const MENU_POPUP = '[class*="contentDefaultAppearance"]';
+  const ownTextFn = `
+    function ownText(n) {
+      return Array.prototype.slice.call(n.childNodes)
+        .filter(function(c) { return c.nodeType === 3; })
+        .map(function(c) { return c.textContent.trim(); }).join(' ').trim();
+    }
+  `;
+
+  const menuAction = (pattern, action) => evaluate(`
+    (function() {
+      var re = new RegExp(${JSON.stringify(pattern)}, 'i');
+      var action = ${JSON.stringify(action)};
+      ${ownTextFn}
+      var pops = document.querySelectorAll('${MENU_POPUP}');
+      for (var i = 0; i < pops.length; i++) {
+        var p = pops[i];
+        if (p.offsetParent === null) continue;
+        var nodes = p.querySelectorAll('[class*="item-"], [class*="title-"]');
+        for (var j = 0; j < nodes.length; j++) {
+          var n = nodes[j];
+          if (n.offsetParent === null) continue;
+          var t = ownText(n);
+          if (!t || t.length > 40 || !re.test(t)) continue;
+          var row = n.closest('[class*="item-"]') || n;
+          var r = row.getBoundingClientRect();
+          if (action === 'hover') {
+            var opts = { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+            ['mouseover', 'mousemove', 'mouseenter'].forEach(function(type) {
+              row.dispatchEvent(new MouseEvent(type, opts));
+            });
+          } else {
+            row.click();
+          }
+          return t;
+        }
+      }
+      return null;
+    })()
+  `);
+
+  const menuOpened = await evaluate(`
+    (function() {
+      var root = document.querySelector('${PINE_ROOT}');
+      if (!root) return false;
+      var title = root.querySelector('[data-qa-id="pine-script-title-button"]') ||
+        Array.prototype.slice.call(root.querySelectorAll('[class*="nameButton"]'))
+          .filter(function(e) { return e.offsetParent !== null; })[0];
+      if (!title) return false;
+      if (title.getAttribute('aria-expanded') !== 'true') title.click();
+      return true;
+    })()
+  `);
+
+  if (!menuOpened) {
+    throw new Error(
+      'Could not open the Pine Editor script menu (looked for the script-name dropdown) ' +
+      `inside ${PINE_ROOT}. Refusing to fall back to overwriting the open script.`
+    );
+  }
+
+  await new Promise(r => setTimeout(r, 400));
+
+  // Open the "Create new" flyout submenu (hover) and pick the type (click).
+  const submenuOpened = await menuAction('^(创建新的|create new)', 'hover');
+  if (!submenuOpened) {
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
+    throw new Error('Could not find "Create new" in the Pine Editor script menu. Refusing to fall back to overwriting the open script.');
+  }
+
+  await new Promise(r => setTimeout(r, 500));
+
+  // Anchor at the start only: the same submenu holds "内置…" (Built-in…) and
+  // zh labels are 指标/策略/脚本库. The length cap excludes long entries.
+  const wanted = {
+    indicator: '^(指标|indicator)',
+    strategy: '^(策略|strategy)',
+    library: '^(脚本库|函数库|library)',
+  }[type] || '^(指标|indicator)';
+  const itemClicked = await menuAction(wanted, 'click');
+
+  if (!itemClicked) {
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
+    throw new Error(
+      'Could not find a "' + type + '" item in the Pine Editor "Create new" submenu. ' +
+      'Refusing to fall back to overwriting the open script.'
+    );
+  }
+
+  await new Promise(r => setTimeout(r, 900));
+
+  const after = await evaluate(READ_BINDING);
+
+  // A genuinely new script is unsaved and carries no version stamp. If the
+  // buffer is still bound to the previously open script, fail loudly — a
+  // later save would otherwise overwrite the user's script. A bound stamp
+  // looks like "8 ∙ Today, 03:02" (digits + ∙/·/• separator); toasts like
+  // '11:25:35 "…"已打开' start with a time and must not match.
+  const stillBound = after?.saveState && /^[0-9]+\s*[∙•·]/.test(after.saveState);
+  if (stillBound) {
+    throw new Error(
+      'Pine Editor still reports a saved script ("' + after.saveState + '") after requesting a new script. ' +
+      'Aborting: saving now would overwrite the open script.'
+    );
+  }
+
+  // Write the template into the now-new (unbound) buffer.
   const escaped = JSON.stringify(template);
   const set = await evaluate(`
     (function() {
@@ -920,16 +1094,16 @@ export async function newScript({ type }) {
       return { ok: true, visible: m.visible };
     })()
   `);
-
-  if (!set || !set.ok) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
+  if (!set || !set.ok) throw new Error('Monaco editor not found after creating the new script.');
 
   return {
     success: true,
     type,
     action: 'new_script_created',
     template: typeMap[type],
-    editor_visible: set.visible,
-    note: 'Template written into the currently ACTIVE editor tab. It replaces that tab\'s buffer — if that tab holds a saved script, save() will overwrite it. To edit on a fresh tab, open a new script in the Pine editor UI first.',
+    menu_item: itemClicked,
+    binding_before: before,
+    binding_after: after,
   };
 }
 
