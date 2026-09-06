@@ -25,11 +25,12 @@ export const tools = [
   },
   {
     name: 'pine_compile',
-    description: 'Compile / add the current Pine Script to the chart. smart=true → intelligent compile: detects the button, compiles, checks errors, reports study changes (use after pine_source set).',
+    description: 'Compile / add the current Pine Script to the chart. smart=true → intelligent compile: detects the button, compiles, checks errors, reports study changes (use after pine_source set). Never clicks Save by default — Save persists into the script slot the editor is bound to and would overwrite that saved script.',
     schema: {
       smart: z.coerce.boolean().optional().describe('Run the smart compile flow (default false = plain compile)'),
+      allow_save: z.coerce.boolean().optional().describe('Allow clicking Save if no non-destructive compile button is found. DANGEROUS: overwrites the saved script the editor is bound to. Default false.'),
     },
-    handler: ({ smart }) => (smart ? core.smartCompile() : core.compile()),
+    handler: ({ smart, allow_save }) => (smart ? core.smartCompile({ allowSave: allow_save === true }) : core.compile()),
   },
   {
     name: 'pine_diagnostics',
@@ -41,7 +42,7 @@ export const tools = [
   },
   {
     name: 'pine_script',
-    description: 'Manage saved Pine scripts. action=new → create blank script (`type`: indicator/strategy/library). action=open → open saved script by `name` (case-insensitive). action=list → list saved scripts. action=verify → inspect the Pine editor state of the connected tab (editor visible, active script tab, buffer match) — call BEFORE pine_source set/save to prevent editing a detached buffer.',
+    description: 'Manage saved Pine scripts. action=new → create a REAL new script via the Pine editor "Create new" menu (`type`: indicator/strategy/library) — never overwrites the open script, fails loudly if the new tab cannot be proven. action=open → open saved script by `name` (case-insensitive). action=list → list saved scripts. action=verify → inspect the Pine editor state of the connected tab (editor visible, active script tab, buffer match) — call BEFORE pine_source set/save to prevent editing a detached buffer.',
     schema: {
       action: z.enum(['new', 'open', 'list', 'verify']).describe('Script management operation'),
       type: z.enum(['indicator', 'strategy', 'library']).optional().describe('Script type (action=new)'),
@@ -116,14 +117,14 @@ export const tools = [
   },
   {
     name: 'pine_smart_compile',
-    description: 'Intelligent compile: detects button, compiles, checks errors, reports study changes',
+    description: 'Intelligent compile: detects button, compiles, checks errors, reports study changes. Does NOT save by default.',
     legacy: 'pine_compile',
     schema: {},
     handler: () => core.smartCompile(),
   },
   {
     name: 'pine_new',
-    description: 'Create a new blank Pine Script',
+    description: 'Create a new blank Pine Script via the Pine editor "Create new" menu (a REAL new tab — never overwrites the open script)',
     legacy: 'pine_script',
     schema: { type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create') },
     handler: ({ type }) => core.newScript({ type }),
