@@ -299,6 +299,33 @@ export async function symbolInfo({ _deps } = {}) {
   return { success: true, ...result };
 }
 
+/**
+ * Read the tick size and contract point value of the main series.
+ *
+ * `chart.symbolExt()` no longer exposes `minmov`/`pricescale` on TV desktop 3.4.1
+ * (they come back `undefined`), so read the main series' symbol info instead.
+ * `tick_size = minmov / pricescale` — MNQ is `25 / 100 = 0.25`.
+ * Hand-drawn coordinates are pixel-derived floats, so consumers need this to
+ * round them to tradable prices.
+ */
+export async function tickInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const result = await evaluate(`
+    (function() {
+      var series = ${CHART_API}._chartWidget.model().mainSeries();
+      var info = series.symbolInfo();
+      var minmov = info.minmov, pricescale = info.pricescale;
+      return {
+        symbol: info.symbol, description: info.description || info.full_name,
+        minmov: minmov, pricescale: pricescale, minmove2: info.minmove2,
+        fractional: info.fractional, pointvalue: info.pointvalue,
+        tick_size: (pricescale ? minmov / pricescale : null),
+      };
+    })()
+  `);
+  return { success: true, ...result };
+}
+
 export async function symbolSearch({ query, type }) {
   // Use TradingView's public symbol search REST API (works without auth)
   const params = new URLSearchParams({

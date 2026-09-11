@@ -15,13 +15,69 @@ import { analyzeICT } from './ict.js';
 const DEFAULT_FILTER = 'iFVG';
 const DEFAULT_MAX_BARS = 100;
 const MAX_BARS = 500;
-const MAX_DRAWINGS = 20;
+const MAX_DRAWINGS = 200;
 const MAX_RECENT_BARS = 8;
 const MAX_PINE_LABELS = 20;
 const MAX_PINE_TABLE_ROWS = 16;
 const MAX_ICT_ITEMS = 12;
 
+/**
+ * Trade-plan fields read from a `long_position` / `short_position` drawing.
+ * `stopLevel` / `profitLevel` are **tick offsets** from the entry price, not points
+ * (MNQ tick 0.25 → `stopLevel: 83` is 20.75 points). The raw `properties` object is
+ * never echoed: it also carries indicator inputs that must stay unexposed.
+ */
+const DRAWING_PLAN_KEYS = Object.freeze([
+  'stopLevel', 'profitLevel', 'qty', 'accountSize', 'risk',
+  'riskDisplayMode', 'lotSize', 'leverage',
+]);
+
 const roundMs = (value) => Math.max(0, Math.round(value));
+
+/** Snap a pixel-derived float to a tradable price. No tick info → return as-is. */
+function roundToTick(price, tick) {
+  if (!Number.isFinite(price) || !Number.isFinite(tick) || tick <= 0) return price;
+  return Math.round(price / tick) * tick;
+}
+
+function tickFromSymbolInfo(info) {
+  const direct = Number(info?.tick_size);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const minmov = Number(info?.minmov);
+  const pricescale = Number(info?.pricescale);
+  if (!Number.isFinite(minmov) || !Number.isFinite(pricescale) || pricescale <= 0) return null;
+  return minmov / pricescale;
+}
+
+/**
+ * Extract the safe, tradable subset of a drawing's properties.
+ * Returns `{}` for non-position drawings unless the drawing carries a text label.
+ */
+function drawingPlan(name, points, rawProps, tick) {
+  const out = {};
+  if (!rawProps || typeof rawProps !== 'object') return out;
+  if (typeof rawProps.text === 'string' && rawProps.text.trim()) out.text = compactText(rawProps.text, 60);
+
+  const isPosition = name === 'long_position' || name === 'short_position';
+  if (!isPosition) return out;
+  for (const key of DRAWING_PLAN_KEYS) {
+    if (Number.isFinite(rawProps[key])) out[key] = rawProps[key];
+  }
+
+  const entry = Array.isArray(points) && Number.isFinite(points[0]?.price) ? points[0].price : null;
+  const stopLevel = Number(rawProps.stopLevel);
+  const profitLevel = Number(rawProps.profitLevel);
+  if (entry == null || !Number.isFinite(stopLevel) || !Number.isFinite(profitLevel) || stopLevel <= 0) return out;
+
+  const long = name === 'long_position';
+  out.direction = long ? 'LONG' : 'SHORT';
+  out.entry = roundToTick(entry, tick);
+  out.stop = roundToTick(long ? entry - stopLevel * tick : entry + stopLevel * tick, tick);
+  out.target = roundToTick(long ? entry + profitLevel * tick : entry - profitLevel * tick, tick);
+  out.rr = Number((profitLevel / stopLevel).toFixed(2));
+  return out;
+}
+
 
 function clampBars(value) {
   return Math.min(Math.max(Number(value) || DEFAULT_MAX_BARS, 1), MAX_BARS);
@@ -276,21 +332,37 @@ function compactICT(ict) {
   };
 }
 
-function compactDrawings(listValue, propertyBatch) {
+function compactDrawings(listValue, propertyBatch, context = {}) {
+  const { tick = null, now = null } = context;
   const shapes = listValue?.shapes || listValue?.drawings || [];
+  const total = Number.isFinite(listValue?.count) ? listValue.count : (Array.isArray(shapes) ? shapes.length : 0);
   const items = Array.isArray(shapes) ? shapes.slice(0, MAX_DRAWINGS).map((shape) => {
     const id = shape?.id ?? null;
     const prop = id == null ? null : propertyBatch?.values?.['drawing_' + id];
-    return {
-      id,
-      name: shape?.name ?? prop?.name ?? null,
-      points: prop?.points ?? shape?.points ?? null,
-    };
+    const name = shape?.name ?? prop?.name ?? null;
+    const rawPoints = prop?.points ?? shape?.points ?? null;
+    const points = Array.isArray(rawPoints) ? rawPoints.map((point) => ({
+      time: Number.isFinite(point?.time) ? point.time : null,
+      price: Number.isFinite(point?.price) ? roundToTick(point.price, tick) : null,
+    })) : null;
+
+    const item = { id, name, points };
+    const times = (points || []).map((point) => point.time).filter(Number.isFinite);
+    if (times.length) {
+      item.from = Math.min(...times);
+      item.to = Math.max(...times);
+      if (Number.isFinite(now)) item.age_s = Math.max(0, now - item.to);
+    }
+    Object.assign(item, drawingPlan(name, points, prop?.properties, tick));
+    return item;
   }) : [];
+
   return {
-    count: listValue?.count ?? shapes.length,
+    count: total,
+    returned: items.length,
+    ...(total > items.length ? { truncated: true } : {}),
+    ...(Number.isFinite(tick) ? { tick } : {}),
     items,
-    ...(shapes.length > MAX_DRAWINGS ? { truncated: true } : {}),
   };
 }
 
@@ -365,6 +437,7 @@ export async function analyzeFast({
     getPineBoxes: _deps?.getPineBoxes || data.getPineBoxes,
     listDrawings: _deps?.listDrawings || drawing.listDrawings,
     getProperties: _deps?.getProperties || drawing.getProperties,
+    getTickInfo: _deps?.getTickInfo || chart.tickInfo,
   };
   const warnings = [];
 
@@ -374,12 +447,14 @@ export async function analyzeFast({
     activeLayout: [deps.getActiveLayout, {}],
     quote: [deps.getQuote, {}],
     ohlcv: [deps.getOhlcv, { count: limit }],
+    tickInfo: [deps.getTickInfo, {}],
   }, clock);
   const anchorMs = roundMs(clock() - anchorStarted);
   const state = readBatch(anchor, 'state', warnings) || {};
   const activeLayout = readBatch(anchor, 'activeLayout', warnings);
   const quote = readBatch(anchor, 'quote', warnings);
   const bars = normalizeBars(readBatch(anchor, 'ohlcv', warnings), limit);
+  const tick = tickFromSymbolInfo(readBatch(anchor, 'tickInfo', warnings) || {});
 
   const required = require_layout == null ? null : String(require_layout).trim();
   const actualLayout = layoutName(activeLayout);
@@ -430,6 +505,15 @@ export async function analyzeFast({
     mode: 'fast_current_chart',
     symbol: state.symbol || quote?.symbol || null,
     timeframe: state.resolution || state.timeframe || null,
+    tick_info: (() => {
+      const info = readBatch(anchor, 'tickInfo', []) || {};
+      if (!Number.isFinite(tick)) return null;
+      return {
+        tick_size: tick,
+        pointvalue: Number.isFinite(Number(info.pointvalue)) ? Number(info.pointvalue) : null,
+        description: info.description || null,
+      };
+    })(),
     active_layout: activeLayout?.active || activeLayout || null,
     quote: compactQuote(quote),
     summary: summarizeBars(bars),
@@ -444,7 +528,9 @@ export async function analyzeFast({
       } : {}),
     },
     indicators: include_indicators ? compactIndicatorValues(readBatch(aux, 'studyValues', warnings), filter) : null,
-    drawings: include_drawings ? compactDrawings(drawingList, propertyBatch) : { enabled: false, count: 0, items: [] },
+    drawings: include_drawings
+      ? compactDrawings(drawingList, propertyBatch, { tick, now: bars.length ? bars[bars.length - 1].time : null })
+      : { enabled: false, count: 0, items: [] },
     ict,
     ...(include_bars ? { bars } : {}),
     warnings,

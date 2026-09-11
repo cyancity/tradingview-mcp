@@ -29,6 +29,7 @@ function deps(overrides = {}) {
     getStudyValues: async () => ({ success: true, studies: [{ id: 'secret', name: 'YOLO iFVG Model', inputs: { text: 'protected blob' }, values: { RSI: 55 } }] }),
     listDrawings: async () => ({ success: true, count: 1, shapes: [{ id: 'shape-1', name: 'rectangle' }] }),
     getProperties: async () => ({ success: true, name: 'rectangle', points: [{ time: data[0].time, price: 100 }, { time: data[1].time, price: 110 }], properties: { secret: 'omit' } }),
+    getTickInfo: async () => ({ success: true, minmov: 25, pricescale: 100, tick_size: 0.25, pointvalue: 2 }),
     ...overrides,
   };
 }
@@ -63,6 +64,50 @@ describe('copilot fast path', () => {
     assert.equal('inputs' in r.indicators.studies[0], false);
     assert.equal(r.drawings.items[0].points[1].price, 110);
     assert.equal('properties' in r.drawings.items[0], false);
+  });
+
+  it('读取 long/short position 交易计划：入场/止损/目标/RR，且不泄露原始 properties', async () => {
+    const r = await analyzeFast({
+      include_drawings: true,
+      _deps: deps({
+        listDrawings: async () => ({ success: true, count: 1, shapes: [{ id: 'pos-1', name: 'long_position' }] }),
+        getProperties: async () => ({
+          success: true,
+          name: 'long_position',
+          points: [{ time: 1788877320, price: 29496.25 }, { time: 1788880440, price: 29496.25 }],
+          properties: {
+            stopLevel: 83, profitLevel: 440, qty: 6.024, accountSize: 1000, risk: 25,
+            riskDisplayMode: 'percents', text: 'BLOCKER', secret: 'omit',
+          },
+        }),
+      }),
+    });
+    const item = r.drawings.items[0];
+    assert.equal(item.direction, 'LONG');
+    assert.equal(item.entry, 29496.25);
+    assert.equal(item.stop, 29475.5, '29496.25 - 83 ticks * 0.25');
+    assert.equal(item.target, 29606.25, '29496.25 + 440 ticks * 0.25');
+    assert.equal(item.rr, 5.3);
+    assert.equal(item.qty, 6.024);
+    assert.equal(item.text, 'BLOCKER');
+    assert.equal('properties' in item, false);
+    assert.equal('secret' in item, false);
+  });
+
+  it('超过上限显式报告截断，坐标按 tick 取整', async () => {
+    const many = Array.from({ length: 205 }, (_, index) => ({ id: 'd-' + index, name: 'rectangle' }));
+    const r = await analyzeFast({
+      include_drawings: true,
+      _deps: deps({
+        listDrawings: async () => ({ success: true, count: many.length, shapes: many }),
+        getProperties: async () => ({ success: true, name: 'rectangle', points: [{ time: 1, price: 29722.27931819008 }, { time: 2, price: 29020.359575671515 }] }),
+      }),
+    });
+    assert.equal(r.drawings.count, 205);
+    assert.equal(r.drawings.returned, 200);
+    assert.equal(r.drawings.truncated, true);
+    assert.equal(r.drawings.tick, 0.25);
+    assert.equal(r.drawings.items[0].points[0].price, 29722.25);
   });
 
   it('layout guard 只校验、不自动切换', async () => {
